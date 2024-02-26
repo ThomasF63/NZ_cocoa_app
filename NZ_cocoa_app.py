@@ -47,36 +47,58 @@ def plot_tree_growth(growth_params_df):
     return chart
 
 
+def plot_emissions_vs_removals(kpi_df):
+    # Define the color scheme explicitly for the chart
+    color_scale = alt.Scale(domain=['Emissions', 'Removals'],
+                            range=['brown', 'lightgreen'])
 
-# Create an Altair chart for the KPIs
-def altair_plot_kpis(kpi_df):
-    # Melting the DataFrame to long format
-    long_df = kpi_df.melt('Year', var_name='variable', value_name='value')
-    
-    # Define a manual domain and range for colors
-    domain = ['Cumulative Emissions', 'Cumulative Removals', 'Carbon Balance']
-    range_ = ['brown', 'lightgreen', 'purple']  # Custom colors for each series
+    df_filtered = kpi_df.melt(id_vars='Year', value_vars=['Emissions', 'Removals'], var_name='Type', value_name='tCO2e')
+    chart = alt.Chart(df_filtered).mark_line().encode(
+        x='Year:Q',
+        y=alt.Y('tCO2e:Q', axis=alt.Axis(title='tCO2e')),
+        color=alt.Color('Type:N', scale=color_scale),
+        tooltip=['Year:Q', 'tCO2e:Q', 'Type:N']
+    ).interactive().properties(title='Emissions vs. Removals Over Time')
+    return chart
 
-    # Creating the chart
-    chart = alt.Chart(long_df).mark_line().encode(
+
+
+def plot_carbon_balance(kpi_df):
+    df_filtered = kpi_df[['Year', 'Carbon Balance']].copy()
+    chart = alt.Chart(df_filtered).mark_line(color='purple').encode(
+        x='Year:Q',
+        y=alt.Y('Carbon Balance:Q', axis=alt.Axis(title='tCO2e')),
+        tooltip=['Year:Q', 'Carbon Balance:Q']
+    ).interactive().properties(title='Carbon Balance Over Time')
+    return chart
+
+
+def plot_carbon_balance_bars(kpi_df):
+    chart = alt.Chart(kpi_df).transform_calculate(
+        positive='datum["Carbon Balance"] >= 0'  # Determines if the balance is positive
+    ).mark_bar().encode(
         x=alt.X('Year:Q', axis=alt.Axis(title='Year')),
-        y=alt.Y('value:Q', axis=alt.Axis(title='tCO2e')),
-        color=alt.Color('variable:N', scale=alt.Scale(domain=domain, range=range_), legend=alt.Legend(title="Series")),
-        tooltip=['Year:Q', 'value:Q', 'variable:N']
-    ).interactive()
+        y=alt.Y('Carbon Balance:Q', axis=alt.Axis(title='tCO2e')),
+        color=alt.condition(
+            alt.datum['Carbon Balance'] >= 0,
+            alt.value('green'),  # Positive values colored green
+            alt.value('red')     # Negative values colored red
+        ),
+        tooltip=['Year:Q', 'Carbon Balance:Q']
+    ).properties(title='Carbon Balance Over Time')
 
     return chart
+
+
 
 ## Streamlit application
 def main():
     st.title('Cocoa Plantation Carbon Footprint Model')
 
 
-
     # Inputs for the simulation time horizon and cultivation cycle duration
     time_horizon = st.number_input('Enter the time horizon for the simulation (years):', min_value=1, value=50, step=1)
     cultivation_cycle_duration = st.number_input('Enter the duration of the cultivation cycle (years):', min_value=1, value=20, step=1)
-
 
 
     # Tree Growth Parameters
@@ -99,12 +121,10 @@ def main():
     st.altair_chart(plot_tree_growth(growth_params_df), use_container_width=True)
 
 
-
     # LUC and replanting/recycling emissions inputs
     st.subheader('LUC and Replanting/Recycling emissions')
     luc_emissions = st.number_input('Enter LUC emissions (tons of CO2):', value=0.0, step=0.1)
     replanting_emissions = st.number_input('Enter Replanting/Recycling emissions (tons of CO2):', value=0.0, step=0.1)
-
 
 
     # Annual Emissions Input for One Cultivation Cycle
@@ -135,7 +155,6 @@ def main():
                 st.session_state.emissions_df.at[row_index, col] = value
 
 
-
     # Initialize arrays to store annual emissions and removals
     annual_emissions = np.zeros(time_horizon)
     annual_removals = np.zeros(time_horizon)
@@ -155,54 +174,43 @@ def main():
             annual_emissions[cycle_start + cultivation_cycle_duration - 1] += replanting_emissions
 
 
-    # Loop for calculating annual removals and adjusting emissions at the end of each cycle
+    # Adjusted loop for calculating annual removals with resetting
     for year in range(time_horizon):
-        cycle_year = year % cultivation_cycle_duration
-        if cycle_year == cultivation_cycle_duration - 1:
-            # At the end of the cycle, count the carbon stored in trees as emissions
-            carbon_stock_final_year = 0
-            for tree_type, params in growth_params_df.iterrows():
-                beta, L, k = params['beta'], params['L'], params['k']
-                carbon_stock_final_year += exponential_growth(cycle_year + 1, beta, L, k)
-            # Add this carbon stock to the emissions for the year
-            annual_emissions[year] += carbon_stock_final_year
-            # Reset removals to zero for this year
-            annual_removals[year] = 0
-        else:
-            for tree_type, params in growth_params_df.iterrows():
-                beta, L, k = params['beta'], params['L'], params['k']
-                # Continue to calculate removals for all other years
-                annual_removals[year] += exponential_growth(cycle_year + 1, beta, L, k)
-
-
-
+        cycle_year = year % cultivation_cycle_duration  # Year within the current cycle
+        annual_removals[year] = 0  # Reset at the start of the loop
+        for tree_type, params in growth_params_df.iterrows():
+            beta, L, k = params['beta'], params['L'], params['k']
+            # Calculate growth only for the current year within the cycle
+            annual_removals[year] += exponential_growth(cycle_year + 1, beta, L, k)
 
 
     # Calculate cumulative emissions, removals, and carbon balance
     cumulative_emissions = np.cumsum(annual_emissions)
-    cumulative_removals = np.cumsum(annual_removals)
-    carbon_balance = cumulative_removals - cumulative_emissions                             
+    carbon_balance = annual_removals - cumulative_emissions                            
 
 
     # Prepare DataFrame for plotting and display with updated calculations
     kpi_df = pd.DataFrame({
-        'Year': np.arange(time_horizon),
-        'Cumulative Emissions': cumulative_emissions,
-        'Cumulative Removals': cumulative_removals,
-        'Carbon Balance': carbon_balance
+    'Year': np.arange(time_horizon),
+    'Emissions': cumulative_emissions,
+    'Removals': annual_removals,  # Updated to show current year's removals
+    'Carbon Balance': carbon_balance  # Adjusted carbon balance calculation
     })
 
 
-
-
     # Plotting the KPIs with Altair
-    st.subheader('Interactive Cumulative Emissions, Removals, and Carbon Balance Over Time')
-    st.altair_chart(altair_plot_kpis(kpi_df), use_container_width=True)
+    st.subheader('Graph: Emissions, Removals, and Carbon Balance Over Time')   
+     # Plotting Emissions vs. Removals
+    st.altair_chart(plot_emissions_vs_removals(kpi_df), use_container_width=True)
+    # Plotting Carbon Balance
+    st.altair_chart(plot_carbon_balance_bars(kpi_df), use_container_width=True)
+
+
 
 
 
     # Display the data table with KPIs
-    st.subheader('Cumulative Emissions, Removals, and Carbon Balance Over Time')
+    st.subheader('Data: Emissions, Removals, and Carbon Balance Over Time')
     st.dataframe(kpi_df)
 
 
