@@ -62,17 +62,6 @@ def plot_emissions_vs_removals(kpi_df):
     return chart
 
 
-
-def plot_carbon_balance(kpi_df):
-    df_filtered = kpi_df[['Year', 'Carbon Balance']].copy()
-    chart = alt.Chart(df_filtered).mark_line(color='purple').encode(
-        x='Year:Q',
-        y=alt.Y('Carbon Balance:Q', axis=alt.Axis(title='tCO2e')),
-        tooltip=['Year:Q', 'Carbon Balance:Q']
-    ).interactive().properties(title='Carbon Balance Over Time')
-    return chart
-
-
 def plot_carbon_balance_bars(kpi_df):
     chart = alt.Chart(kpi_df).transform_calculate(
         positive='datum["Carbon Balance"] >= 0'  # Determines if the balance is positive
