@@ -120,6 +120,15 @@ def main():
     st.subheader('Annual Emissions Input for One Cultivation Cycle')
     emission_sources = ['Equipment', 'Fuel', 'Fertilizer', 'Soil Amendments', 'Pesticide', 'Drying']
 
+    # File Uploader for Custom Emissions Data
+    uploaded_file = st.file_uploader("Upload your emissions data CSV", type=['csv'])
+    if uploaded_file is not None:
+        custom_emissions_df = pd.read_csv(uploaded_file)
+        if len(custom_emissions_df) == cultivation_cycle_duration:
+            st.session_state.emissions_df = custom_emissions_df
+        else:
+            st.error(f"Please ensure the uploaded CSV has exactly {cultivation_cycle_duration} rows to match the cultivation cycle duration.")
+
     if 'emissions_df' not in st.session_state or len(st.session_state.emissions_df) != cultivation_cycle_duration:
         # Generate initial emissions values
         initial_values = np.linspace(start=[0.5, 0.3, 0.4, 0.2, 0.25, 0.3], 
@@ -143,24 +152,41 @@ def main():
                 # You can add validation logic here if necessary
                 st.session_state.emissions_df.at[row_index, col] = value
 
+    # Convert the annual emissions DataFrame to CSV for download
+    annual_emissions_csv = edited_emissions_df.to_csv(index=False)
+
+    # New: Create a download button for the annual emissions CSV data
+    st.download_button(
+        label="Download Annual Emissions Data as CSV",
+        data=annual_emissions_csv,
+        file_name='annual_emissions_data.csv',
+        mime='text/csv',
+    )
+
 
     # Initialize arrays to store annual emissions and removals
     annual_emissions = np.zeros(time_horizon)
     annual_removals = np.zeros(time_horizon)
 
-
-    # Calculate annual emissions from editable inputs
+    # Adjust the logic to account for LUC emissions only in the first year
+    # and replanting/recycling emissions in the last year of each cultivation cycle
     for cycle_start in range(0, time_horizon, cultivation_cycle_duration):
         for year in range(cultivation_cycle_duration):
-            if cycle_start + year < time_horizon:
-                # Add emissions for each source; LUC and replanting handled separately
-                annual_emissions[cycle_start + year] += edited_emissions_df.iloc[year].sum()
-        
-        # Handle LUC emissions at the start of each cycle and replanting at the end
-        if cycle_start < time_horizon:
-            annual_emissions[cycle_start] += luc_emissions
-        if cycle_start + cultivation_cycle_duration - 1 < time_horizon:
-            annual_emissions[cycle_start + cultivation_cycle_duration - 1] += replanting_emissions
+            current_year = cycle_start + year
+            if current_year < time_horizon:
+                # Add emissions for each source; LUC handled separately
+                annual_emissions[current_year] += edited_emissions_df.iloc[year % cultivation_cycle_duration].sum()
+
+        # Handle LUC emissions only in the first year of the simulation
+        if cycle_start == 0:
+            annual_emissions[0] += luc_emissions
+
+        # Handle replanting/recycling emissions at the end of each cultivation cycle,
+        # but not beyond the simulation time horizon
+        last_year_of_cycle = cycle_start + cultivation_cycle_duration - 1
+        if last_year_of_cycle < time_horizon:
+            annual_emissions[last_year_of_cycle] += replanting_emissions
+
 
 
     # Adjusted loop for calculating annual removals with resetting
@@ -200,7 +226,20 @@ def main():
 
     # Display the data table with KPIs
     st.subheader('Data: Emissions, Removals, and Carbon Balance Over Time')
+    # Round all values in the DataFrame to two decimal places
+    kpi_df = kpi_df.round(2)
     st.dataframe(kpi_df)
+
+    # Convert DataFrame to CSV string
+    csv = kpi_df.to_csv(index=False)
+
+    # Create a download button for the CSV data
+    st.download_button(
+        label="Download data as CSV",
+        data=csv,
+        file_name='carbon_balance_data.csv',
+        mime='text/csv',
+    )
 
 
 
