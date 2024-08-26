@@ -1,7 +1,7 @@
 import streamlit as st
-from one_hectare_model import one_hectare_model
 from planting_schedule import planting_schedule
 from data_handling import initialize_inputs
+from one_hectare_model import one_hectare_model
 
 def main():
     st.title("Cocoa Farm Emissions and Carbon Storage Simulator")

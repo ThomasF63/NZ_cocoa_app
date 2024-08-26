@@ -1,11 +1,12 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import altair as alt
 from helper_functions import exponential_growth, logarithmic_growth, power_function_growth, get_equation_latex
 
 def tree_growth_parameters(time_horizon):
     st.title("Tree Growth")
-    st.header("Growth Parametrization")
+    st.header("Growth Parameterization")
 
     tree_types = ['Cocoa', 'Shade', 'Timber']
     growth_models = ["Logarithmic Growth (Terra Global Method)", "Exponential Plateau", "Power Function (Cool Farm Method)"]
@@ -36,7 +37,7 @@ def tree_growth_parameters(time_horizon):
     }
 
     # Ensure default_params is initialized in session state
-    if 'default_params' not in st.session_state or not st.session_state.default_params:
+    if 'default_params' not in st.session_state:
         st.session_state.default_params = default_params
     else:
         # Update existing default_params with any new keys/values
@@ -69,13 +70,28 @@ def tree_growth_parameters(time_horizon):
             params_df = pd.DataFrame(params, index=[tree_type])
             edited_params = st.data_editor(params_df, key=f"{tree_type}_params_editor")
 
+            # Display the formatted version of the parameters
+            st.dataframe(edited_params.style.format("{:.2f}"))
+
             for key in edited_params.columns:
                 st.session_state.default_params[selected_model][key][i] = edited_params.at[tree_type, key]
 
             growth_curve_df = calculate_growth_curve(edited_params, time_horizon, tree_type)
-            st.line_chart(growth_curve_df.set_index('Year'))
+            
+            chart = alt.Chart(growth_curve_df).mark_line().encode(
+                x=alt.X('Age:Q', axis=alt.Axis(format='d')),
+                y=alt.Y('Carbon Stock (tCO2e/ha):Q', axis=alt.Axis(format='d')),
+                tooltip=[
+                    alt.Tooltip('Age:Q', format='d'),
+                    alt.Tooltip('Carbon Stock (tCO2e/ha):Q', format='.2f')
+                ]
+            ).interactive()
+            st.altair_chart(chart, use_container_width=True)
 
-            st.dataframe(growth_curve_df)
+            st.dataframe(growth_curve_df.style.format({
+                'Age': '{:0.0f}',
+                'Carbon Stock (tCO2e/ha)': '{:.2f}'
+            }))
 
     # Calculate combined growth models
     combined_df = combine_tree_growth_models(st.session_state.growth_curve_selections, st.session_state.default_params, time_horizon)
@@ -83,19 +99,40 @@ def tree_growth_parameters(time_horizon):
     st.subheader("Combined Tree Growth Models")
     summary_df = pd.DataFrame.from_dict(st.session_state.growth_curve_selections, orient='index', columns=['Selected Growth Model'])
     st.table(summary_df)
-    st.dataframe(combined_df)
-    st.line_chart(combined_df.set_index('Year'))
+    
+    st.dataframe(combined_df.style.format({
+        'Year': '{:0.0f}',
+        'Cocoa': '{:.2f}',
+        'Shade': '{:.2f}',
+        'Timber': '{:.2f}'
+    }))
+    
+    # Create a melted dataframe for plotting
+    melted_df = combined_df.melt('Year', var_name='Tree Type', value_name='Carbon Stock (tCO2e/ha)')
+    
+    # Create the line chart
+    chart = alt.Chart(melted_df).mark_line().encode(
+        x=alt.X('Year:Q', axis=alt.Axis(format='d', title = 'Year')),
+        y=alt.Y('Carbon Stock (tCO2e/ha):Q', axis=alt.Axis(format='d')),
+        color='Tree Type:N',
+        tooltip=[
+            alt.Tooltip('Year:T', format='d'),
+            alt.Tooltip('Tree Type:N'),
+            alt.Tooltip('Carbon Stock (tCO2e/ha):Q', format='.2f')
+        ]
+    ).interactive()
+    
+    st.altair_chart(chart, use_container_width=True)
 
     if st.button("Validate Tree Growth Parameters"):
         st.session_state['growth_params_df'] = combined_df
         st.success("Tree Growth Parameters validated and saved!")
-        st.write("Debug: growth_params_df saved in session state")
-        st.write(st.session_state['growth_params_df'])
+        st.info(f"Growth parameters saved for {', '.join(tree_types)}")
 
     return combined_df
 
 def calculate_growth_curve(params_df, time_horizon, tree_type):
-    t = np.linspace(1, time_horizon, time_horizon)
+    t = np.arange(1, time_horizon + 1, dtype=int)
     selected_model = st.session_state.growth_curve_selections[tree_type]
 
     if selected_model == "Exponential Plateau":
@@ -113,35 +150,45 @@ def calculate_growth_curve(params_df, time_horizon, tree_type):
         conversion_factor = params_df.at[tree_type, 'conversion_factor']
         y = power_function_growth(t, alpha, beta, carbon_content, conversion_factor)
 
-    growth_curve_df = pd.DataFrame({'Year': t, 'Carbon Stock (tCO2e/ha)': y})
+    growth_curve_df = pd.DataFrame({'Age': t, 'Carbon Stock (tCO2e/ha)': y})
     return growth_curve_df
 
 def combine_tree_growth_models(growth_curve_selections, default_params, time_horizon):
-    t = np.linspace(1, time_horizon, time_horizon)
-    combined_df = pd.DataFrame(t, columns=['Year'])
+    plantation_start_year = st.session_state.get('land_prep_year', 2015)
+    years = np.arange(plantation_start_year, plantation_start_year + time_horizon, dtype=int)
+    combined_df = pd.DataFrame({'Year': years})
+    combined_df['Year'] = combined_df['Year'].astype(int)
 
-    for i, (tree_type, growth_curve_type) in enumerate(growth_curve_selections.items()):
-        if growth_curve_type not in default_params:
-            st.error(f"Model '{growth_curve_type}' not found in default parameters.")
-            return combined_df
+    for tree_type, growth_curve_type in growth_curve_selections.items():
+        planting_year = st.session_state.get(f'{tree_type.lower()}_planting_year', plantation_start_year)
+        age = np.maximum(0, years - planting_year)
 
-        params = {key: default_params[growth_curve_type][key][i] for key in default_params[growth_curve_type]}
+        # Safely get parameters for the current tree type
+        params = {}
+        for key in default_params[growth_curve_type]:
+            param_list = default_params[growth_curve_type][key]
+            param_index = min(list(growth_curve_selections.keys()).index(tree_type), len(param_list) - 1)
+            params[key] = param_list[param_index]
+
         params_df = pd.DataFrame(params, index=[tree_type])
 
+        y = np.zeros_like(age, dtype=float)  # Initialize with zeros
+
+        mask = age > 0  # Only calculate growth for positive ages
         if growth_curve_type == "Exponential Plateau":
             beta, L, k = params_df.at[tree_type, 'beta'], params_df.at[tree_type, 'L'], params_df.at[tree_type, 'k']
-            y = exponential_growth(t, beta, L, k)
+            y[mask] = exponential_growth(age[mask], beta, L, k)
         elif growth_curve_type == "Logarithmic Growth (Terra Global Method)":
             coefficient = params_df.at[tree_type, 'Coefficient']
             intercept = params_df.at[tree_type, 'Intercept']
-            y = logarithmic_growth(t, coefficient, intercept)
+            y[mask] = logarithmic_growth(age[mask], coefficient, intercept)
             partitioning = params_df.at[tree_type, f'Partitioning {tree_type.split()[0]}']
-            y = y * partitioning
+            y[mask] *= partitioning
         elif growth_curve_type == "Power Function (Cool Farm Method)":
             alpha, beta = params_df.at[tree_type, 'alpha'], params_df.at[tree_type, 'beta']
             carbon_content = params_df.at[tree_type, 'carbon_content']
             conversion_factor = params_df.at[tree_type, 'conversion_factor']
-            y = power_function_growth(t, alpha, beta, carbon_content, conversion_factor)
+            y[mask] = power_function_growth(age[mask], alpha, beta, carbon_content, conversion_factor)
 
         combined_df[tree_type] = y
 

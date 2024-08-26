@@ -2,75 +2,186 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import altair as alt
-from removals_calculations import calculate_removals
-from helper_functions import create_removals_line_chart
+from reserve_rate_widget import reserve_rate_widget
+import helper_functions as hf
 
 
+def calculate_annual_removals(carbon_stocks_df, cultivation_cycle_duration, plantation_timeline):
+    land_prep_year = plantation_timeline['land_prep_year']
+    time_horizon = len(carbon_stocks_df)
+    annual_removals = np.zeros((time_horizon, len(carbon_stocks_df.columns) - 1))  # Exclude 'Year' column
+    cumulative_removals = np.zeros((time_horizon, len(carbon_stocks_df.columns) - 1))
+    removal_reversals = np.zeros(time_horizon)
+    
+    for i, tree_type in enumerate(carbon_stocks_df.columns[1:]):  # Skip 'Year' column
+        planting_year = st.session_state.get(f'{tree_type.lower()}_planting_year', land_prep_year)
+        remove_at_cycle_end = st.session_state.get(f'remove_{tree_type.lower()}_at_cycle_end', True)
+        replanting_delay = st.session_state.get(f'{tree_type.lower()}_replanting_delay', 0) if remove_at_cycle_end else 0
+        
+        tree_age = 0
+        for year in range(time_horizon):
+            actual_year = land_prep_year + year
+            years_since_planting = actual_year - planting_year
+            cycle_year = years_since_planting % cultivation_cycle_duration if years_since_planting >= 0 else -1
+            
+            if cycle_year == -1:
+                # Before planting
+                annual_removals[year, i] = 0
+                cumulative_removals[year, i] = 0
+            elif remove_at_cycle_end and cycle_year == cultivation_cycle_duration - 1:
+                # Last year of cycle for trees that are removed
+                current_stock = carbon_stocks_df.iloc[min(tree_age, len(carbon_stocks_df) - 1), i+1]
+                annual_removals[year, i] = max(0, current_stock - cumulative_removals[year-1, i])
+                cumulative_removals[year, i] = current_stock
+                reversal = cumulative_removals[year, i]
+                removal_reversals[year + 1] = reversal  # Store reversal for next year
+                tree_age = 0
+            elif remove_at_cycle_end and cycle_year < replanting_delay:
+                # During replanting delay for trees that are removed
+                annual_removals[year, i] = 0
+                cumulative_removals[year, i] = 0
+            else:
+                # Normal growth or continued growth for trees not removed
+                tree_age += 1
+                current_stock = carbon_stocks_df.iloc[min(tree_age - 1, len(carbon_stocks_df) - 1), i+1]
+                previous_stock = cumulative_removals[year-1, i] if year > 0 else 0
+                annual_removals[year, i] = max(0, current_stock - previous_stock)
+                cumulative_removals[year, i] = current_stock
 
-def calculate_annual_removals(carbon_stocks_df):
-    # Calculate the annual removals as the difference in carbon stocks between consecutive years
-    annual_removals_df = carbon_stocks_df.diff().fillna(0)
-    annual_removals_df['Year'] = carbon_stocks_df['Year']
-    annual_removals_df.iloc[0, 1:] = carbon_stocks_df.iloc[0, 1:]  # First year removals are the same as carbon stocks
-
-    # Apply reserve rate
-    if st.session_state.get('apply_reserve_rate', True):
-        reserve_rate = st.session_state.get('reserve_rate', 0.5)
-        annual_removals_df.iloc[:, 1:] *= reserve_rate
-
-    return annual_removals_df
+    return annual_removals, cumulative_removals, removal_reversals
 
 
 
 def prepare_removals_dataframes(time_horizon, cultivation_cycle_duration):
     if 'growth_params_df' not in st.session_state or st.session_state.growth_params_df is None:
         st.write("No growth data available.")
-        return None
+        return None, None
 
     growth_params_df = st.session_state['growth_params_df']
 
-    # Calculate annual removals
-    annual_removals_df = calculate_annual_removals(growth_params_df)
+    # Check if the growth_params_df has the expected structure
+    if 'Year' not in growth_params_df.columns or len(growth_params_df.columns) < 2:
+        st.write("Error: growth_params_df does not have the expected structure.")
+        st.write("Columns:", growth_params_df.columns)
+        return None, None
 
-    # Ensure the 'Year' column is correctly inserted
-    if 'Year' not in annual_removals_df.columns:
-        year_data = np.arange(1, time_horizon + 1)
-        annual_removals_df.insert(0, 'Year', year_data)
-    else:
-        annual_removals_df['Year'] = np.arange(1, time_horizon + 1)
+    plantation_timeline = {
+        'land_prep_year': st.session_state.get('land_prep_year', 2015),
+        'shade_planting_year': st.session_state.get('shade_planting_year', 2016),
+        'cocoa_planting_year': st.session_state.get('cocoa_planting_year', 2017),
+        'timber_planting_year': st.session_state.get('timber_planting_year', 2016)
+    }
+
+    annual_removals, cumulative_removals, removal_reversals = calculate_annual_removals(growth_params_df, cultivation_cycle_duration, plantation_timeline)
+
+    land_prep_year = plantation_timeline['land_prep_year']
+    year_numbers = np.arange(1, time_horizon + 1)
+    actual_years = land_prep_year + (year_numbers - 1)
+
+    annual_removals_df = pd.DataFrame(annual_removals, columns=growth_params_df.columns[1:])
+    annual_removals_df.insert(0, 'Year Number', year_numbers)
+    annual_removals_df.insert(1, 'Year', actual_years)
     
-    annual_removals_df['Total_Removals'] = annual_removals_df.drop(columns='Year').sum(axis=1)
-    st.session_state['annual_removals_df'] = annual_removals_df  # Save to session state
+    cumulative_removals_df = pd.DataFrame(cumulative_removals, columns=growth_params_df.columns[1:])
+    cumulative_removals_df.insert(0, 'Year Number', year_numbers)
+    cumulative_removals_df.insert(1, 'Year', actual_years)
+    
+    annual_removals_df['Total_Removals'] = annual_removals_df.drop(columns=['Year Number', 'Year']).sum(axis=1)
+    cumulative_removals_df['Total_Removals'] = cumulative_removals_df.drop(columns=['Year Number', 'Year']).sum(axis=1)
 
-    return annual_removals_df
+    annual_removals_df['Removal Reversals'] = removal_reversals
+    cumulative_removals_df['Removal Reversals'] = np.cumsum(removal_reversals)  # Use cumulative sum for cumulative dataframe
 
+    # Store removal reversals in session state for use in emissions calculations
+    st.session_state['removal_reversals'] = removal_reversals
+
+    return annual_removals_df, cumulative_removals_df
+
+
+
+def create_removals_stacked_bar_chart(dataframe, x_col, y_col, color_col, title):
+    # Exclude 'Year', 'Year Number', and 'Total_Removals' columns
+    melt_columns = [col for col in dataframe.columns if col not in [x_col, 'Year Number', 'Total_Removals', 'Removal Reversals']]
+    long_df = dataframe.melt(id_vars=[x_col], value_vars=melt_columns, var_name=color_col, value_name='Removals_Value')
+    
+    chart = alt.Chart(long_df).mark_bar().encode(
+        x=alt.X(f'{x_col}:O', axis=alt.Axis(title='Year', format='d', labelAngle=0)),  # Use 'd' format for no comma
+        y=alt.Y('Removals_Value:Q', stack='zero', axis=alt.Axis(title='Removals (tCO2e)')),
+        color=alt.Color(f'{color_col}:N', title='Tree Type'),
+        tooltip=[alt.Tooltip(f'{x_col}:O', title='Year', format='d'), f'{color_col}:N', alt.Tooltip('Removals_Value:Q', format='.2f')]
+    ).properties(
+        title=title,
+        width=600,
+        height=400
+    )
+    
+    return chart
 
 
 def removals_analysis(time_horizon):
-    prepare_removals_dataframes(time_horizon, st.session_state.get('cultivation_cycle_duration', 20))
-
-    if 'annual_removals_df' not in st.session_state or st.session_state.annual_removals_df is None:
+    st.subheader('Removals Analysis')
+    
+    apply_reserve_rate, reserve_rate = reserve_rate_widget()
+    
+    cultivation_cycle_duration = st.session_state.get('cultivation_cycle_duration', 20)
+    annual_removals_df, cumulative_removals_df = prepare_removals_dataframes(time_horizon, cultivation_cycle_duration)
+    
+    if annual_removals_df is None or annual_removals_df.empty:
         st.write("No removals data available. Please complete the tree growth section first.")
         return
 
-    annual_removals_df = st.session_state['annual_removals_df']
+    # Store the original removals for reference
+    st.session_state['original_annual_removals_df'] = annual_removals_df.copy()
+    st.session_state['original_cumulative_removals_df'] = cumulative_removals_df.copy()
+
+    # Apply reserve rate if enabled
+    if apply_reserve_rate:
+        for col in annual_removals_df.columns:
+            if col not in ['Year Number', 'Year', 'Total_Removals', 'Removal Reversals']:
+                annual_removals_df[col] *= (1 - reserve_rate)
+                cumulative_removals_df[col] *= (1 - reserve_rate)
+        annual_removals_df['Total_Removals'] *= (1 - reserve_rate)
+        cumulative_removals_df['Total_Removals'] *= (1 - reserve_rate)
+
+    # Recalculate total removals after applying reserve rate
+    annual_removals_df['Total_Removals'] = annual_removals_df.drop(columns=['Year Number', 'Year', 'Removal Reversals']).sum(axis=1)
+    cumulative_removals_df['Total_Removals'] = cumulative_removals_df.drop(columns=['Year Number', 'Year', 'Removal Reversals']).sum(axis=1)
+
+    # Reorder columns to ensure Year Number and Year are first
+    column_order = ['Year Number', 'Year'] + [col for col in annual_removals_df.columns if col not in ['Year Number', 'Year']]
+    annual_removals_df = annual_removals_df[column_order]
+    cumulative_removals_df = cumulative_removals_df[column_order]
+
+    st.session_state['annual_removals_df'] = annual_removals_df
+    st.session_state['cumulative_removals_df'] = cumulative_removals_df
 
     st.subheader('Graph: Annual Removals Over Time')
-    removals_chart = create_removals_line_chart(annual_removals_df, 'Year', 'Total_Removals', 'Tree Type')
-    st.altair_chart(removals_chart, use_container_width=True)
+    annual_removals_chart = create_removals_stacked_bar_chart(annual_removals_df, 'Year', 'Removals', 'Tree Type', "Annual Removals Over Time")
+    st.altair_chart(annual_removals_chart, use_container_width=True)
 
     st.subheader('Table: Annual Removals Over Time')
-    st.dataframe(annual_removals_df)
-
+    format_dict = {col: '{:.2f}' for col in annual_removals_df.columns}
+    format_dict.update({
+        'Year Number': '{:0.0f}',
+        'Year': '{:0.0f}',
+        'Total_Removals': '{:.2f}',
+        'Removal Reversals': '{:.2f}'
+    })
+    st.dataframe(annual_removals_df.style.format(format_dict))
 
     st.subheader('Graph: Cumulative Removals Over Time')
-    cumulative_removals_df = annual_removals_df.copy()
-    cumulative_removals_df.iloc[:, 1:-1] = cumulative_removals_df.iloc[:, 1:-1].cumsum()
-    cumulative_removals_chart = create_removals_line_chart(cumulative_removals_df, 'Year', 'Total_Removals', 'Tree Type')
+    cumulative_removals_chart = create_removals_stacked_bar_chart(cumulative_removals_df, 'Year', 'Removals', 'Tree Type', "Cumulative Removals Over Time")
     st.altair_chart(cumulative_removals_chart, use_container_width=True)
 
     st.subheader('Table: Cumulative Removals Over Time')
-    st.dataframe(cumulative_removals_df)
+    format_dict = {col: '{:.2f}' for col in cumulative_removals_df.columns}
+    format_dict.update({
+        'Year Number': '{:0.0f}',
+        'Year': '{:0.0f}',
+        'Total_Removals': '{:.2f}',
+        'Removal Reversals': '{:.2f}'
+    })
+    st.dataframe(cumulative_removals_df.style.format(format_dict))
 
 
 

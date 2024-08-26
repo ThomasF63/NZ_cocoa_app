@@ -1,92 +1,103 @@
+# one_hectare_model.py
+
 import streamlit as st
-import pandas as pd
-import numpy as np
-from data_handling import simulation_parameters, cocoa_yield_curve, carbon_balance_section, carbon_intensity_section, summary_section
+from data_handling import simulation_parameters
 from tree_growth import tree_growth_parameters
 from emissions import emissions_input, emissions_analysis
 from removals import removals_analysis
-
+from scenario_management import save_scenario, load_scenario, get_saved_scenarios, duplicate_scenario, delete_scenario
+from cocoa_yield import cocoa_yield_curve
+from LUC import luc_parameters
+from planting_density import planting_density_section
+from carbon_intensity import carbon_intensity_section
+from carbon_balance import carbon_balance_section
+from summary import summary_section
+from plantation_timeline import plantation_timeline
+from data_handling import apply_global_reserve_rate
 
 
 def one_hectare_model():
     st.sidebar.title("One Hectare Model Sections")
-    sections = ["Simulation Parameters", "Tree Growth Parameters", "Planting Density", "Cocoa Yield Curve", "Emissions", "Removals", "Carbon Balance", "Carbon Intensity", "Summary"]
-    section = st.sidebar.radio("Go to Section", sections)
+    sections = [
+        "Simulation Parameters",
+        "LUC Parameters",
+        "Plantation Timeline",
+        "Tree Growth Parameters",
+        "Planting Density",
+        "Cocoa Yield Curve",
+        "Removals",
+        "Emissions",
+        "Carbon Balance",
+        "Carbon Intensity",
+        "Summary",
+        "Save/Load Scenario"
+    ]
+    section = st.sidebar.radio("Go to Section", sections, index=0)
+
+    time_horizon = st.session_state.get('time_horizon', 50)
+    cultivation_cycle_duration = st.session_state.get('cultivation_cycle_duration', 10)
 
     if section == "Simulation Parameters":
-        time_horizon, cultivation_cycle_duration, luc_emission_approach, amortization_years = simulation_parameters()
+        time_horizon, cultivation_cycle_duration = simulation_parameters()
         st.session_state['time_horizon'] = time_horizon
         st.session_state['cultivation_cycle_duration'] = cultivation_cycle_duration
 
-    time_horizon = st.session_state.get('time_horizon', 10)
-    cultivation_cycle_duration = st.session_state.get('cultivation_cycle_duration', 20)
+    elif section == "LUC Parameters":
+        luc_event_year, luc_emissions, luc_application, amortize_luc, amortization_years, amortization_method = luc_parameters()
 
-    if section == "Tree Growth Parameters":
+    elif section == "Plantation Timeline":
+        land_prep_year, shade_planting_year, cocoa_planting_year, timber_planting_year = plantation_timeline()
+
+    elif section == "Tree Growth Parameters":
         growth_params_df = tree_growth_parameters(time_horizon)
+
     elif section == "Planting Density":
-        planting_density_section()
+        density_df = planting_density_section()
+
     elif section == "Cocoa Yield Curve":
-        cocoa_yield_df = cocoa_yield_curve(cultivation_cycle_duration, time_horizon)
-    elif section == "Emissions":
-        luc_emissions, replanting_emissions, emissions_df = emissions_input(cultivation_cycle_duration)
-        emissions_analysis(time_horizon)
+        cocoa_yield_curve(cultivation_cycle_duration, time_horizon)
+
     elif section == "Removals":
         removals_analysis(time_horizon)
+
+    elif section == "Emissions":
+        emissions_df = emissions_input(cultivation_cycle_duration)
+        emissions_analysis(time_horizon)
+
     elif section == "Carbon Balance":
         carbon_balance_section(time_horizon)
+
     elif section == "Carbon Intensity":
         carbon_intensity_section(time_horizon)
+
     elif section == "Summary":
         summary_section(time_horizon)
 
-
-
-
-def planting_density_section():
-    st.header("Planting Density")
-
-    if 'planting_densities' not in st.session_state:
-        st.session_state.planting_densities = {
-            'reference': {'Cocoa': 1800, 'Shade': 150, 'Timber': 33},
-            'modified': {'Cocoa': 1950, 'Shade': 0, 'Timber': 33}
-        }
-        st.session_state.selected_density = 'reference'
-
-    st.subheader("Reference Density")
-    reference_cocoa_density = st.number_input("Reference Cocoa Density (trees/ha):", min_value=0, value=st.session_state.planting_densities['reference']['Cocoa'], key='reference_cocoa_density')
-    reference_shade_density = st.number_input("Reference Shade Density (trees/ha):", min_value=0, value=st.session_state.planting_densities['reference']['Shade'], key='reference_shade_density')
-    reference_timber_density = st.number_input("Reference Timber Density (trees/ha):", min_value=0, value=st.session_state.planting_densities['reference']['Timber'], key='reference_timber_density')
-
-    st.subheader("Modified Density")
-    modified_cocoa_density = st.number_input("Modified Cocoa Density (trees/ha):", min_value=0, value=st.session_state.planting_densities['modified']['Cocoa'], key='modified_cocoa_density')
-    modified_shade_density = st.number_input("Modified Shade Density (trees/ha):", min_value=0, value=st.session_state.planting_densities['modified']['Shade'], key='modified_shade_density')
-    modified_timber_density = st.number_input("Modified Timber Density (trees/ha):", min_value=0, value=st.session_state.planting_densities['modified']['Timber'], key='modified_timber_density')
-
-    density_option = st.radio("Select Density to Use:", ('Reference', 'Modified'), key='density_option')
-
-    if st.button("Validate Planting Densities"):
-        st.session_state.planting_densities['reference']['Cocoa'] = reference_cocoa_density
-        st.session_state.planting_densities['reference']['Shade'] = reference_shade_density
-        st.session_state.planting_densities['reference']['Timber'] = reference_timber_density
-
-        st.session_state.planting_densities['modified']['Cocoa'] = modified_cocoa_density
-        st.session_state.planting_densities['modified']['Shade'] = modified_shade_density
-        st.session_state.planting_densities['modified']['Timber'] = modified_timber_density
-
-        st.session_state.selected_density = 'reference' if density_option == 'Reference' else 'modified'
+    elif section == "Save/Load Scenario":
+        st.subheader("Save Current Scenario")
+        scenario_name = st.text_input("Scenario Name")
+        if st.button("Save Scenario"):
+            save_scenario(scenario_name)
         
-        reference_densities = st.session_state.planting_densities['reference']
-        modified_densities = st.session_state.planting_densities[st.session_state.selected_density]
+        st.subheader("Load Saved Scenario")
+        saved_scenarios = get_saved_scenarios()
+        selected_scenario = st.selectbox("Select Scenario to Load", saved_scenarios)
+        if st.button("Load Scenario"):
+            load_scenario(selected_scenario)
 
-        # Recalculate growth data based on the selected densities
-        adjust_growth_data_based_on_density(reference_densities, modified_densities)
+        st.subheader("Duplicate Scenario")
+        duplicate_scenario_name = st.selectbox("Select Scenario to Duplicate", saved_scenarios)
+        new_scenario_name = st.text_input("New Scenario Name")
+        if st.button("Duplicate Scenario"):
+            duplicate_scenario(duplicate_scenario_name, new_scenario_name)
 
-        st.success("Planting densities validated and growth data updated!")
-        st.write("Debug: planting_densities and selected_density saved in session state")
-        st.write(st.session_state.planting_densities)
-        st.write(st.session_state.selected_density)
+        st.subheader("Delete Scenario")
+        delete_scenario_name = st.selectbox("Select Scenario to Delete", saved_scenarios)
+        if st.button("Delete Scenario"):
+            delete_scenario(delete_scenario_name)
 
-def adjust_growth_data_based_on_density(reference_densities, selected_densities):
-    for tree_type in reference_densities:
-        ratio = selected_densities[tree_type] / reference_densities[tree_type]
-        st.session_state.growth_params_df[tree_type] *= ratio
+
+        if st.button("Recalculate All Sections"):
+            apply_global_reserve_rate()
+            st.experimental_rerun()
+

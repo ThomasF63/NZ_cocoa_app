@@ -31,3 +31,15 @@ def calculate_annual_emissions_removals(time_horizon, cultivation_cycle_duration
                 annual_removals[year, tree_type] = alpha * (year + 1) ** beta
 
     return annual_emissions, annual_removals
+
+
+def calculate_discounted_luc_emissions(luc_emissions, luc_event_year, amortization_years=20):
+    discount_factors = [
+        0.0975, 0.0925, 0.0875, 0.0825, 0.0775, 0.0725, 0.0675, 0.0625, 0.0575, 0.0525,
+        0.0475, 0.0425, 0.0375, 0.0325, 0.0275, 0.0225, 0.0175, 0.0125, 0.0075, 0.0025
+    ]
+    total_emissions = 0.0
+    for i in range(amortization_years):
+        year_emissions = luc_emissions * discount_factors[i]
+        total_emissions += year_emissions
+    return total_emissions

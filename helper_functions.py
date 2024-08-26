@@ -43,22 +43,22 @@ def plot_combined_tree_growth(df):
 
 
 
-def create_removals_stacked_bar_chart(df, x_col, y_col, color_col, title):
-    import altair as alt
-
-    df_melted = df.melt(id_vars=[x_col], value_vars=df.columns.difference([x_col, 'Total']), var_name=color_col, value_name=y_col)
+def create_removals_stacked_bar_chart(dataframe, x_axis, y_axis, color_category, title="Removals Stacked Bar Chart"):
+    # Exclude 'Year', 'Year Number', and 'Total_Removals' columns
+    melt_columns = [col for col in dataframe.columns if col not in [x_axis, 'Year Number', 'Total_Removals']]
+    long_df = dataframe.melt(id_vars=[x_axis], value_vars=melt_columns, var_name=color_category, value_name='Removals_Value')
     
-    chart = alt.Chart(df_melted).mark_bar().encode(
-        x=alt.X(f'{x_col}:O', title='Year', axis=alt.Axis(labelAngle=0)),  # Ensure labels are vertical
-        y=alt.Y(f'{y_col}:Q', title='Removals'),
-        color=color_col,
-        tooltip=[x_col, y_col, color_col]
+    chart = alt.Chart(long_df).mark_bar().encode(
+        x=alt.X(f'{x_axis}:N', axis=alt.Axis(title=x_axis, labelAngle=0)),  # Ensure labels are vertical
+        y=alt.Y('Removals_Value:Q', stack='zero', axis=alt.Axis(title='Removals (tCO2e)')),
+        color=alt.Color(f'{color_category}:N', title='Tree Type'),
+        tooltip=[f'{x_axis}:N', f'{color_category}:N', 'Removals_Value:Q']
     ).properties(
         title=title,
-        width=800,
+        width=600,
         height=400
-    ).interactive()
-
+    )
+    
     return chart
 
 
@@ -107,15 +107,15 @@ def plot_removals_by_tree_type(scenario):
 
 
 def create_annual_emissions_stacked_bar_chart(dataframe, x_axis, y_axis, color_category, title="Annual Emissions Stacked Bar Chart"):
-    # Exclude the 'Total' column
-    melt_columns = [col for col in dataframe.columns if col not in [x_axis, 'Total']]
+    # Exclude the 'Year' column from melt_columns
+    melt_columns = [col for col in dataframe.columns if col != x_axis]
     long_df = dataframe.melt(id_vars=[x_axis], value_vars=melt_columns, var_name=color_category, value_name='Emissions_Value')
     
     chart = alt.Chart(long_df).mark_bar().encode(
-        x=alt.X(f'{x_axis}:N', axis=alt.Axis(title=x_axis, labelAngle=0)),  # Ensure labels are vertical
+        x=alt.X(f'{x_axis}:O', axis=alt.Axis(title='Year', format='d', labelAngle=0)),  # Use 'd' format for no comma
         y=alt.Y('Emissions_Value:Q', stack='zero', axis=alt.Axis(title='Emissions (tCO2e)')),
         color=alt.Color(f'{color_category}:N', title='Source'),
-        tooltip=[f'{x_axis}:N', f'{color_category}:N', 'Emissions_Value:Q']
+        tooltip=[alt.Tooltip(f'{x_axis}:O', title='Year', format='d'), f'{color_category}:N', alt.Tooltip('Emissions_Value:Q', format='.3f')]
     ).properties(
         title=title,
         width=600,
@@ -126,18 +126,15 @@ def create_annual_emissions_stacked_bar_chart(dataframe, x_axis, y_axis, color_c
 
 
 def create_cumulative_emissions_stacked_bar_chart(dataframe, x_axis, y_axis, color_category, title="Cumulative Emissions Stacked Bar Chart"):
-    # Calculate cumulative emissions
-    cumulative_df = dataframe.copy()
-    melt_columns = [col for col in cumulative_df.columns if col not in [x_axis, 'Total']]
-    cumulative_df[melt_columns] = cumulative_df[melt_columns].cumsum()
-
-    long_df = cumulative_df.melt(id_vars=[x_axis], value_vars=melt_columns, var_name=color_category, value_name='Cumulative_Emissions_Value')
+    # The dataframe should already contain cumulative values, so we don't need to recalculate
+    melt_columns = [col for col in dataframe.columns if col not in [x_axis, 'Year Number', 'Total']]
+    long_df = dataframe.melt(id_vars=[x_axis], value_vars=melt_columns, var_name=color_category, value_name='Cumulative_Emissions_Value')
     
     chart = alt.Chart(long_df).mark_bar().encode(
-        x=alt.X(f'{x_axis}:N', axis=alt.Axis(title=x_axis, labelAngle=0)),  # Ensure labels are vertical
+        x=alt.X(f'{x_axis}:O', axis=alt.Axis(title='Year', format='d', labelAngle=0)),  # Use 'd' format for no comma
         y=alt.Y('Cumulative_Emissions_Value:Q', stack='zero', axis=alt.Axis(title='Cumulative Emissions (tCO2e)')),
         color=alt.Color(f'{color_category}:N', title='Source'),
-        tooltip=[f'{x_axis}:N', f'{color_category}:N', 'Cumulative_Emissions_Value:Q']
+        tooltip=[alt.Tooltip(f'{x_axis}:O', title='Year', format='d'), f'{color_category}:N', alt.Tooltip('Cumulative_Emissions_Value:Q', format='.3f')]
     ).properties(
         title=title,
         width=600,
@@ -147,35 +144,34 @@ def create_cumulative_emissions_stacked_bar_chart(dataframe, x_axis, y_axis, col
     return chart
 
 
-
 def plot_carbon_balance_bars_one_hectare(kpi_df, time_horizon):
     chart = alt.Chart(kpi_df).transform_calculate(
         positive='datum["Carbon Balance"] < 0'
     ).mark_bar().encode(
-        x=alt.X('Year:Q', axis=alt.Axis(title='Year')),
+        x=alt.X('Year:O', axis=alt.Axis(title='Year', format='d')),
         y=alt.Y('Carbon Balance:Q', axis=alt.Axis(title='tCO2e')),
         color=alt.condition(
             alt.datum['Carbon Balance'] < 0,
             alt.value('green'),
             alt.value('red')
         ),
-        tooltip=['Year:Q', 'Carbon Balance:Q']
+        tooltip=[alt.Tooltip('Year:O', title='Year', format='d'), 'Carbon Balance:Q']
     )
     return chart
 
 
 
 def plot_emissions_vs_removals_one_hectare(kpi_df, time_horizon):
-    df_filtered = kpi_df.melt(id_vars='Year', value_vars=['Emissions', 'Removals'], var_name='Type', value_name='tCO2e')
+    df_filtered = kpi_df.melt(id_vars=['Year', 'Year Number'], value_vars=['Emissions', 'Removals'], var_name='Type', value_name='tCO2e')
     color_scale = alt.Scale(
         domain=['Emissions', 'Removals'],
         range=[do.EMISSIONS_COLOR, do.REMOVALS_COLOR]
     )
     chart = alt.Chart(df_filtered).mark_line().encode(
-        x=alt.X('Year:Q', axis=alt.Axis(title='Year')),
+        x=alt.X('Year:O', axis=alt.Axis(title='Year', format='d')),
         y=alt.Y('tCO2e:Q', axis=alt.Axis(title='tCO2e')),
         color=alt.Color('Type:N', scale=color_scale),
-        tooltip=['Year:Q', 'tCO2e:Q', 'Type:N']
+        tooltip=[alt.Tooltip('Year:O', title='Year', format='d'), 'tCO2e:Q', 'Type:N']
     )
     return chart
 
@@ -360,3 +356,53 @@ def plot_removals_by_tree_type(scenario):
             tooltip=['Year:O', 'Tree Type:N', 'Removals:Q']
         ).properties(title=f'Annual Removals by Tree Type for Scenario {scenario}')
         st.altair_chart(removals_chart, use_container_width=True)
+
+
+
+def plot_cumulative_carbon_intensity(kpi_df):
+    if 'kpi_df' in st.session_state:
+        kpi_df = st.session_state.kpi_df
+
+        cumulative_df = kpi_df.copy()
+        cumulative_df['Total Cocoa Yield'] = cumulative_df[[col for col in cumulative_df.columns if 'Cocoa Yield' in col]].sum(axis=1)
+
+        for scenario in st.session_state.scenarios_df['Scenario'].unique():
+            cumulative_df[f'{scenario}: Cumulative Carbon Intensity'] = cumulative_df[f'{scenario}: Cumulative Emissions'] / cumulative_df['Total Cocoa Yield']
+
+        value_vars = [f'{scenario}: Cumulative Carbon Intensity' for scenario in st.session_state.scenarios_df['Scenario'].unique()]
+        melted_df = cumulative_df.melt(id_vars='Year', value_vars=value_vars, var_name='Scenario', value_name='Carbon Intensity')
+
+        carbon_intensity_chart = alt.Chart(melted_df).mark_line().encode(
+            x='Year:Q',
+            y='Carbon Intensity:Q',
+            color='Scenario:N',
+            tooltip=['Year', 'Scenario', 'Carbon Intensity']
+        ).properties(title='Cumulative Carbon Intensity Over Time')
+
+        st.altair_chart(carbon_intensity_chart, use_container_width=True)
+
+
+
+def plot_annual_carbon_intensity(kpi_df):
+    if 'kpi_df' in st.session_state:
+        kpi_df = st.session_state.kpi_df
+
+        annual_df = kpi_df.copy()
+        annual_df['Total Cocoa Yield'] = annual_df[[col for col in annual_df.columns if 'Cocoa Yield' in col]].sum(axis=1)
+
+        for scenario in st.session_state.scenarios_df['Scenario'].unique():
+            annual_df[f'{scenario}: Annual Carbon Intensity'] = annual_df[f'{scenario}: Cumulative Emissions'] / annual_df['Total Cocoa Yield']
+
+        value_vars = [f'{scenario}: Annual Carbon Intensity' for scenario in st.session_state.scenarios_df['Scenario'].unique()]
+        melted_df = annual_df.melt(id_vars='Year', value_vars=value_vars, var_name='Scenario', value_name='Carbon Intensity')
+
+        carbon_intensity_chart = alt.Chart(melted_df).mark_line().encode(
+            x='Year:Q',
+            y='Carbon Intensity:Q',
+            color='Scenario:N',
+            tooltip=['Year', 'Scenario', 'Carbon Intensity']
+        ).properties(title='Annual Carbon Intensity Over Time')
+
+        st.altair_chart(carbon_intensity_chart, use_container_width=True)
+
+

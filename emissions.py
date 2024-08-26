@@ -2,15 +2,17 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import helper_functions as hf
-from utils import calculate_annual_emissions_removals
+from LUC import generate_luc_emissions_df
 
+def update_emissions_df(cultivation_cycle_duration=20):
+    emission_sources = ['Year Number', 'Year', 'Equipment Fuel', 'Fertilizer Estimate', 'Soil Amendments', 'Pesticide Estimate', 'Drying Estimate']
 
+    # Determine the start year based on land preparation year
+    land_prep_year = st.session_state.get('land_prep_year', 2015)
+    year_numbers = np.arange(1, cultivation_cycle_duration + 1)
+    actual_years = land_prep_year + (year_numbers - 1)
 
-def update_emissions_df(cultivation_cycle_duration, luc_emissions, replanting_emissions):
-    emission_sources = ['Year', 'Equipment Fuel', 'Fertilizer Estimate', 'Soil Amendments', 'Pesticide Estimate', 'Drying Estimate', 'LUC Emissions', 'Replanting Emissions', 'Total']
-    years = np.arange(1, cultivation_cycle_duration + 1)
-    
-    # Updated initial values for emissions
+    # Initial emissions values (for a 20-year cycle)
     initial_values = np.array([
         [0.022, 0.000, 0.000, 0.000, 0.000],
         [0.118, 0.000, 0.000, 0.000, 0.009],
@@ -24,99 +26,179 @@ def update_emissions_df(cultivation_cycle_duration, luc_emissions, replanting_em
         [1.467, 0.875, 0.060, 0.005, 1.080]
     ])
 
-    # Repeat the last row to fill up to the cultivation cycle duration
-    if cultivation_cycle_duration > 10:
-        repeated_values = np.tile(initial_values[-1, :], (cultivation_cycle_duration - 10, 1))
-        emissions_values = np.vstack((initial_values, repeated_values))
-    else:
-        emissions_values = initial_values[:cultivation_cycle_duration, :]
+    # Use only the first 'cultivation_cycle_duration' rows
+    emissions_values = initial_values[:cultivation_cycle_duration]
 
-    # Add LUC and replanting columns
-    luc_column = np.zeros(cultivation_cycle_duration)
-    replanting_column = np.zeros(cultivation_cycle_duration)
+    # Create the DataFrame
+    emissions_df = pd.DataFrame(np.column_stack((year_numbers[:cultivation_cycle_duration], 
+                                                 actual_years[:cultivation_cycle_duration], 
+                                                 emissions_values)), 
+                                columns=emission_sources)
+    
+    # Calculate total emissions
+    emissions_df['Total'] = emissions_df.iloc[:, 2:].sum(axis=1)
 
-    if st.session_state.get('luc_emission_approach', 'At Start') == 'At Start':
-        luc_column[0] = luc_emissions
-    else:
-        luc_column[:st.session_state.get('amortization_years', 10)] = luc_emissions / st.session_state.get('amortization_years', 10)
-
-    emissions_values = np.column_stack((emissions_values, luc_column, replanting_column))
-    emissions_df = pd.DataFrame(np.column_stack((years, emissions_values, np.zeros((cultivation_cycle_duration, 1)))), columns=emission_sources)
-    emissions_df['Total'] = emissions_df.iloc[:, 1:8].sum(axis=1)
+    # Save to session state
     st.session_state.emissions_df = emissions_df
 
-    update_annual_emissions_df(time_horizon=st.session_state['time_horizon'], cultivation_cycle_duration=cultivation_cycle_duration, luc_emissions=luc_emissions, replanting_emissions=replanting_emissions)
+    return emissions_df
 
+def generate_emissions_forecast(time_horizon, cultivation_cycle_duration):
+    # Get the farm management emissions template
+    template_df = st.session_state.emissions_df
 
+    # Create a new DataFrame for the forecast
+    forecast_df = pd.DataFrame(index=range(time_horizon))
+    
+    # Fill in the farm management emissions
+    for year in range(time_horizon):
+        cycle_year = year % cultivation_cycle_duration
+        for col in template_df.columns:
+            if col not in ['Year Number', 'Year']:
+                forecast_df.loc[year, col] = template_df.loc[min(cycle_year, len(template_df) - 1), col]
 
-def update_annual_emissions_df(time_horizon, cultivation_cycle_duration, luc_emissions, replanting_emissions):
-    if 'growth_params_df' not in st.session_state or st.session_state.growth_params_df is None:
-        st.write("No growth data available.")
-        return
+    # Add Year Number and Year columns
+    forecast_df['Year Number'] = range(1, time_horizon + 1)
+    forecast_df['Year'] = st.session_state.get('land_prep_year', 2015) + forecast_df['Year Number'] - 1
 
-    growth_params_df = st.session_state.growth_params_df
-    emissions_df = st.session_state.emissions_df
-    luc_emission_approach = st.session_state.get('luc_emission_approach', 'At Start')
-    amortization_years = st.session_state.get('amortization_years', 10)
+    # Add LUC emissions
+    luc_emissions_df = generate_luc_emissions_df(
+        time_horizon, 
+        st.session_state.get('luc_event_year', 2015),
+        st.session_state.get('luc_emissions', 5.0),
+        st.session_state.get('amortization_years', 5),
+        st.session_state.get('amortization_method', 'Equal Amortization'),
+        st.session_state.get('luc_application', "At LUC event year"),
+        st.session_state.get('amortize_luc', False)
+    )
+    forecast_df['LUC Emissions'] = luc_emissions_df['LUC Emissions']
 
-    annual_emissions, _ = calculate_annual_emissions_removals(time_horizon, cultivation_cycle_duration, growth_params_df, emissions_df, luc_emissions, replanting_emissions, luc_emission_approach, amortization_years)
-    emissions_sources = emissions_df.columns.tolist()
-    annual_emissions_df = pd.DataFrame(annual_emissions, columns=emissions_sources)
-    if 'Year' not in annual_emissions_df.columns:
-        annual_emissions_df.insert(0, 'Year', np.arange(1, time_horizon + 1))
+    # Add Removal Reversals
+    if 'removal_reversals' in st.session_state:
+        forecast_df['Removal Reversals'] = st.session_state['removal_reversals'][:time_horizon]
     else:
-        annual_emissions_df['Year'] = np.arange(1, time_horizon + 1)
-    st.session_state.annual_emissions_df = annual_emissions_df
+        forecast_df['Removal Reversals'] = 0
+
+    # Calculate total emissions
+    forecast_df['Total'] = forecast_df.drop(['Year Number', 'Year'], axis=1).sum(axis=1)
+
+    return forecast_df
+
+
+
+def update_annual_emissions_df(time_horizon, cultivation_cycle_duration):
+    if 'emissions_df' not in st.session_state or st.session_state.emissions_df is None or st.session_state.emissions_df.empty:
+        st.write("No emissions data available. Generating default emissions data.")
+        emissions_df = update_emissions_df(cultivation_cycle_duration)
+    else:
+        emissions_df = st.session_state.emissions_df
+
+    if emissions_df.empty:
+        st.error("Unable to generate emissions data. Please check your inputs and try again.")
+        return None
+
+    annual_emissions = np.zeros((time_horizon, len(emissions_df.columns)))
+
+    # Get the initial year from the start of the first cycle
+    initial_year = emissions_df['Year'].iloc[0]
+
+    for year in range(time_horizon):
+        cycle_year = year % cultivation_cycle_duration
+        annual_emissions[year] = emissions_df.iloc[cycle_year].values
+
+    # Calculate the actual year based on the initial year and the year number
+    actual_years = initial_year + np.arange(time_horizon)
+
+    annual_emissions_df = pd.DataFrame(annual_emissions, columns=emissions_df.columns)
+    annual_emissions_df['Year Number'] = np.arange(1, time_horizon + 1)
+    annual_emissions_df['Year'] = actual_years  # Assign the correct continuous years
+
+    return annual_emissions_df
 
 
 
 def emissions_input(cultivation_cycle_duration):
-    st.subheader('LUC and Replanting/Recycling emissions')
+    st.subheader('Emissions Input')
 
-    # Initialize emissions_df if it doesn't exist
-    if 'emissions_df' not in st.session_state:
-        update_emissions_df(cultivation_cycle_duration, st.session_state.get('luc_emissions', 0.5648), st.session_state.get('replanting_emissions', 0.0))
+    # Initialize or update emissions_df with the cultivation cycle duration
+    emissions_df = update_emissions_df(cultivation_cycle_duration)
 
-    # Create columns for input boxes and buttons
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        luc_emissions = st.number_input('Enter LUC emissions (tCO2e/ha):', value=st.session_state.get('luc_emissions', 0.5648), step=0.1)
-    with col2:
-        if st.button('Update LUC Emissions'):
-            st.session_state.luc_emissions = luc_emissions  # Save to session state
-            update_emissions_df(cultivation_cycle_duration, luc_emissions, st.session_state.get('replanting_emissions', 0.0))
+    if emissions_df is not None and not emissions_df.empty:
+        st.subheader(f'Table: Farm Management Emissions Template ({cultivation_cycle_duration} years)')
+        st.dataframe(emissions_df)
+    else:
+        st.error("Failed to generate emissions template. Please check your inputs and try again.")
+        return None
 
-    col3, col4 = st.columns([3, 1])
-    with col3:
-        replanting_emissions = st.number_input('Enter Replanting/Recycling emissions (tCO2e/ha):', value=st.session_state.get('replanting_emissions', 0.0), step=0.1)
-    with col4:
-        if st.button('Update Replanting Emissions'):
-            st.session_state.replanting_emissions = replanting_emissions  # Save to session state
-            update_emissions_df(cultivation_cycle_duration, st.session_state.get('luc_emissions', 0.5648), replanting_emissions)
+    # Generate and store the full emissions forecast
+    time_horizon = st.session_state.get('time_horizon', 50)
+    forecast_df = generate_emissions_forecast(time_horizon, cultivation_cycle_duration)
+    
+    # Add removal reversals to the forecast
+    if 'removal_reversals' in st.session_state:
+        forecast_df['Removal Reversals'] = st.session_state['removal_reversals']
+    else:
+        forecast_df['Removal Reversals'] = 0
+    
+    # Recalculate total emissions including removal reversals
+    forecast_df['Total'] = forecast_df.drop(['Year Number', 'Year'], axis=1).sum(axis=1)
+    
+    # Reorder columns to ensure Year Number and Year are first
+    columns_order = ['Year Number', 'Year'] + [col for col in forecast_df.columns if col not in ['Year Number', 'Year']]
+    forecast_df = forecast_df[columns_order]
+    
+    st.session_state.annual_emissions_df = forecast_df
 
-    st.subheader('Table: Annual Emissions Input for One Cultivation Cycle')
-    st.dataframe(st.session_state.emissions_df)
-
-    return luc_emissions, replanting_emissions, st.session_state.emissions_df
+    return emissions_df
 
 
 
 def emissions_analysis(time_horizon):
-    if 'annual_emissions_df' in st.session_state:
+    if 'annual_emissions_df' in st.session_state and st.session_state.annual_emissions_df is not None:
         emissions_df = st.session_state.annual_emissions_df
 
+        # Ensure Year Number and Year are the first two columns
+        columns_order = ['Year Number', 'Year'] + [col for col in emissions_df.columns if col not in ['Year Number', 'Year']]
+        emissions_df = emissions_df[columns_order]
+
         st.subheader('Graph: Annual Emissions Over Time')
-        annual_emissions_chart = hf.create_annual_emissions_stacked_bar_chart(emissions_df, 'Year', 'Emissions', 'Emission Source')
+        
+        # Exclude 'Year Number', 'Year', and 'Total' from emission sources for the chart
+        emissions_chart_df = emissions_df.drop(columns=['Year Number', 'Total'])
+        annual_emissions_chart = hf.create_annual_emissions_stacked_bar_chart(emissions_chart_df, 'Year', 'Emissions', 'Emission Source')
         st.altair_chart(annual_emissions_chart, use_container_width=True)
 
         st.subheader('Table: Annual Emissions Over Time')
-        st.dataframe(emissions_df)
+        format_dict = {col: '{:.3f}' for col in emissions_df.columns if col not in ['Year Number', 'Year']}
+        format_dict.update({
+            'Year Number': '{:0.0f}',
+            'Year': '{:0.0f}'
+        })
+        st.dataframe(emissions_df.style.format(format_dict))
 
         st.subheader('Graph: Cumulative Emissions Over Time')
-        cumulative_emissions_chart = hf.create_cumulative_emissions_stacked_bar_chart(emissions_df, 'Year', 'Cumulative Emissions', 'Emission Source')
+        # Calculate the cumulative emissions
+        cumulative_emissions_df = emissions_df.drop(columns=['Year Number', 'Year', 'Total']).cumsum()
+        cumulative_emissions_df['Year'] = emissions_df['Year']
+        cumulative_emissions_df['Year Number'] = emissions_df['Year Number']
+        
+        # Calculate the total for each year
+        cumulative_emissions_df['Total'] = cumulative_emissions_df.drop(['Year', 'Year Number'], axis=1).sum(axis=1)
+        
+        # Reorder columns to ensure Year Number and Year are first
+        columns_order = ['Year Number', 'Year'] + [col for col in cumulative_emissions_df.columns if col not in ['Year Number', 'Year']]
+        cumulative_emissions_df = cumulative_emissions_df[columns_order]
+        
+        cumulative_emissions_chart = hf.create_cumulative_emissions_stacked_bar_chart(cumulative_emissions_df, 'Year', 'Cumulative Emissions', 'Emission Source')
         st.altair_chart(cumulative_emissions_chart, use_container_width=True)
 
         st.subheader('Table: Cumulative Emissions Over Time')
-        cumulative_emissions_df = emissions_df.copy()
-        cumulative_emissions_df.iloc[:, 1:] = cumulative_emissions_df.iloc[:, 1:].cumsum()
-        st.dataframe(cumulative_emissions_df)
+        format_dict = {col: '{:.3f}' for col in cumulative_emissions_df.columns if col not in ['Year Number', 'Year']}
+        format_dict.update({
+            'Year Number': '{:0.0f}',
+            'Year': '{:0.0f}'
+        })
+        st.dataframe(cumulative_emissions_df.style.format(format_dict))
+
+    else:
+        st.warning("No emissions data available. Please ensure the emissions input section is completed and data is properly calculated.")
