@@ -1,29 +1,32 @@
+# whole_farm.py
+
 import streamlit as st
 import pandas as pd
 import numpy as np
 import altair as alt
-from scenario_management import get_saved_scenarios, load_scenario, save_farm, load_farm, get_saved_farms
 import helper_functions as hf
+import design_options as do
+from scenario_management import get_saved_scenarios, load_scenario, save_farm, load_farm, get_saved_farms
+
 
 def generate_farm_simulation_data(farm_blocks, time_horizon=None):
     if time_horizon is None:
         time_horizon = st.session_state.get('time_horizon', 50)
     
     land_prep_year = st.session_state.get('land_prep_year', 2015)
-    kpi_df = pd.DataFrame({'Year': range(land_prep_year, land_prep_year + time_horizon)})
+    kpi_df = pd.DataFrame({
+        'Year Number': range(1, time_horizon + 1),
+        'Year': range(land_prep_year, land_prep_year + time_horizon)
+    })
     
     total_emissions = np.zeros(time_horizon)
     total_removals = np.zeros(time_horizon)
     total_area_planted = np.zeros(time_horizon)
-    annual_cocoa_yield = np.zeros(time_horizon)
-    cumulative_cocoa_yield = np.zeros(time_horizon)
+    annual_cocoa_production = np.zeros(time_horizon)
+    cumulative_cocoa_production = np.zeros(time_horizon)
     
-    # Dictionaries to store block-specific data
-    annual_emissions_dict = {}
-    annual_removals_dict = {}
-    cumulative_emissions_dict = {}
-    cumulative_removals_dict = {}
-    cocoa_yield_dict = {}
+    # Dictionary to store block-specific area data
+    area_planted_dict = {}
 
     for _, block in farm_blocks.iterrows():
         scenario_name = block['Scenario']
@@ -38,13 +41,19 @@ def generate_farm_simulation_data(farm_blocks, time_horizon=None):
         
         annual_emissions = scenario_data['annual_emissions_df']['Total'].values
         annual_removals = scenario_data['annual_removals_df']['Total_Removals'].values
-        cocoa_yield = scenario_data['cocoa_yield_df'].get('Yield', np.zeros(time_horizon)).values
+        cocoa_yield = scenario_data['cocoa_yield_df'].get('Cocoa Yield (kg/ha/yr)', np.zeros(time_horizon))
         
-        annual_emissions_per_block = np.zeros(time_horizon)
-        annual_removals_per_block = np.zeros(time_horizon)
-        cumulative_emissions_per_block = np.zeros(time_horizon)
-        cumulative_removals_per_block = np.zeros(time_horizon)
-        cocoa_yield_per_block = np.zeros(time_horizon)
+        # Convert to numpy array if it's a pandas Series
+        if isinstance(cocoa_yield, pd.Series):
+            cocoa_yield = cocoa_yield.values
+        
+        # Ensure cocoa_yield has the correct length
+        if len(cocoa_yield) < time_horizon:
+            cocoa_yield = np.pad(cocoa_yield, (0, time_horizon - len(cocoa_yield)), 'edge')
+        elif len(cocoa_yield) > time_horizon:
+            cocoa_yield = cocoa_yield[:time_horizon]
+
+        area_planted_per_block = np.zeros(time_horizon)
         
         for year in range(time_horizon):
             if year >= start_year - land_prep_year:
@@ -52,54 +61,44 @@ def generate_farm_simulation_data(farm_blocks, time_horizon=None):
                 if scenario_year < len(annual_emissions):
                     total_emissions[year] += annual_emissions[scenario_year] * block_area
                     total_removals[year] += annual_removals[scenario_year] * block_area
-                    annual_cocoa_yield[year] += cocoa_yield[scenario_year] * block_area
-                    annual_emissions_per_block[year] = annual_emissions[scenario_year] * block_area
-                    annual_removals_per_block[year] = annual_removals[scenario_year] * block_area
-                    cocoa_yield_per_block[year] = cocoa_yield[scenario_year] * block_area
+                    annual_cocoa_production[year] += cocoa_yield[scenario_year] * block_area / 1000  # Convert kg to tonnes
+                    area_planted_per_block[year] = block_area
                 total_area_planted[year] += block_area
 
-        cumulative_emissions_per_block = np.cumsum(annual_emissions_per_block)
-        cumulative_removals_per_block = np.cumsum(annual_removals_per_block)
-        
-        annual_emissions_dict[block['Block']] = annual_emissions_per_block
-        annual_removals_dict[block['Block']] = annual_removals_per_block
-        cumulative_emissions_dict[block['Block']] = cumulative_emissions_per_block
-        cumulative_removals_dict[block['Block']] = cumulative_removals_per_block
-        cocoa_yield_dict[block['Block']] = cocoa_yield_per_block
+        area_planted_dict[block['Block']] = area_planted_per_block
 
-    kpi_df['Cumulative Emissions'] = np.cumsum(total_emissions)
-    kpi_df['Cumulative Removals'] = np.cumsum(total_removals)
+    kpi_df['Total Area Planted (ha)'] = total_area_planted
     kpi_df['Annual Emissions'] = total_emissions
     kpi_df['Annual Removals'] = total_removals
-    kpi_df['Carbon Balance'] = kpi_df['Cumulative Removals'] - kpi_df['Cumulative Emissions']
-    kpi_df['Total Area Planted'] = total_area_planted
-    kpi_df['Annual Cocoa Yield'] = annual_cocoa_yield
-    kpi_df['Cumulative Cocoa Yield'] = np.cumsum(annual_cocoa_yield)
+    kpi_df['Cumulative Emissions'] = np.cumsum(total_emissions)
+    kpi_df['Cumulative Removals'] = np.cumsum(total_removals)
+    kpi_df['Annual Cocoa Production'] = annual_cocoa_production
+    kpi_df['Cumulative Cocoa Production'] = np.cumsum(annual_cocoa_production)
+    
+    # Calculate cocoa production in t/ha/yr and t/ha
+    kpi_df['Annual Cocoa Production (t/ha/yr)'] = np.where(kpi_df['Total Area Planted (ha)'] > 0, 
+                                                           kpi_df['Annual Cocoa Production'] / kpi_df['Total Area Planted (ha)'], 
+                                                           0)
+    kpi_df['Cumulative Cocoa Production (t/ha)'] = np.where(kpi_df['Total Area Planted (ha)'] > 0, 
+                                                            kpi_df['Cumulative Cocoa Production'] / kpi_df['Total Area Planted (ha)'], 
+                                                            0)
 
-    # Add block-specific data to kpi_df
-    for block, emissions in annual_emissions_dict.items():
-        kpi_df[f'{block} Annual Emissions'] = emissions
-    for block, removals in annual_removals_dict.items():
-        kpi_df[f'{block} Annual Removals'] = removals
-    for block, emissions in cumulative_emissions_dict.items():
-        kpi_df[f'{block} Cumulative Emissions'] = emissions
-    for block, removals in cumulative_removals_dict.items():
-        kpi_df[f'{block} Cumulative Removals'] = removals
-    for block, yield_vals in cocoa_yield_dict.items():
-        kpi_df[f'{block} Cocoa Yield'] = yield_vals
+    # Add block-specific area data to kpi_df
+    for block, area in area_planted_dict.items():
+        kpi_df[f'{block} Area Planted'] = area
 
     st.session_state.kpi_df = kpi_df
 
     return kpi_df
 
-def whole_farm_simulation():
-    st.subheader('Whole Farm Simulation')
 
-    steps = ["Farm Blocks", "Results", "Save/Load Farm"]
-    choice = st.sidebar.radio("Select Step", steps)
+def whole_farm_simulation():
+    st.sidebar.title("Whole Farm Simulation")
+    steps = ["Farm Blocks", "Carbon Balance", "Carbon Intensity", "Summary", "Save/Load Farm"]
+    choice = st.sidebar.radio("Go to Section", steps)
 
     if choice == "Farm Blocks":
-        st.subheader("Farm Blocks")
+        st.header('Farm Blocks', divider="gray")
 
         if 'farm_blocks' not in st.session_state:
             st.session_state.farm_blocks = pd.DataFrame({
@@ -109,13 +108,16 @@ def whole_farm_simulation():
                 "Scenario": []
             })
 
-        # Planting scenario table
-        st.subheader("Farm Blocks")
-        st.data_editor(
-            data=st.session_state.farm_blocks,
-            num_rows="dynamic",
-            key="farm_blocks_editor"
-        )
+        # Add "Update Graphs and Tables" button at the top
+        if st.button("Update Graphs and Tables", key="update_top"):
+            st.session_state.update_flag = True
+            generate_farm_simulation_data(st.session_state.farm_blocks, st.session_state.get('time_horizon', 50))
+
+        # Farm blocks table (non-editable)
+        st.dataframe(st.session_state.farm_blocks.style.format({
+            'Area (ha)': '{:.2f}',
+            'Year': '{:.0f}'
+        }))
 
         # Graph: Total Area Planted Over Time
         if 'kpi_df' in st.session_state:
@@ -142,54 +144,128 @@ def whole_farm_simulation():
                     "Scenario": [new_scenario]
                 })
                 st.session_state.farm_blocks = pd.concat([st.session_state.farm_blocks, new_entry], ignore_index=True)
-                st.experimental_rerun()  # Trigger rerun to update the table
+                st.rerun()
+
+
+        # Editable table for managing blocks
+        st.subheader("Manage Blocks")
+
+        edited_farm_blocks = st.data_editor(
+            st.session_state.farm_blocks,
+            num_rows="dynamic",
+            key="farm_blocks_editor"
+        )
+
+        # Update button for editable table
+        if st.button("Update Blocks", key="update_blocks"):
+            st.session_state.farm_blocks = edited_farm_blocks
+            st.session_state.update_flag = True
+            generate_farm_simulation_data(st.session_state.farm_blocks, st.session_state.get('time_horizon', 50))
+            st.success("Farm blocks updated successfully!")
+            st.rerun()
 
         # Block duplication and deletion controls
-        st.subheader("Manage Blocks")
-        block_to_duplicate = st.selectbox("Select Block to Duplicate", st.session_state.farm_blocks["Block"].tolist())
-        duplicated_block_name = st.text_input("New Name for Duplicated Block")
-        if st.button("Duplicate Block"):
-            if duplicated_block_name in st.session_state.farm_blocks["Block"].values:
-                st.error("A block with this name already exists. Please choose a different name.")
-            else:
-                block_data = st.session_state.farm_blocks.loc[st.session_state.farm_blocks["Block"] == block_to_duplicate].copy()
-                block_data["Block"] = duplicated_block_name
-                st.session_state.farm_blocks = pd.concat([st.session_state.farm_blocks, block_data], ignore_index=True)
-                st.experimental_rerun()  # Trigger rerun to update the table
+        col1, col2 = st.columns(2)
+        with col1:
+            block_to_duplicate = st.selectbox("Select Block to Duplicate", st.session_state.farm_blocks["Block"].tolist())
+            duplicated_block_name = st.text_input("New Name for Duplicated Block")
+            if st.button("Duplicate Block"):
+                if duplicated_block_name in st.session_state.farm_blocks["Block"].values:
+                    st.error("A block with this name already exists. Please choose a different name.")
+                else:
+                    block_data = st.session_state.farm_blocks.loc[st.session_state.farm_blocks["Block"] == block_to_duplicate].copy()
+                    block_data["Block"] = duplicated_block_name
+                    st.session_state.farm_blocks = pd.concat([st.session_state.farm_blocks, block_data], ignore_index=True)
+                    st.rerun()
 
-        block_to_delete = st.selectbox("Select Block to Delete", st.session_state.farm_blocks["Block"].tolist())
-        if st.button("Delete Block"):
-            st.session_state.farm_blocks = st.session_state.farm_blocks[st.session_state.farm_blocks["Block"] != block_to_delete]
-            st.experimental_rerun()  # Trigger rerun to update the table
+        with col2:
+            block_to_delete = st.selectbox("Select Block to Delete", st.session_state.farm_blocks["Block"].tolist())
+            if st.button("Delete Block"):
+                st.session_state.farm_blocks = st.session_state.farm_blocks[st.session_state.farm_blocks["Block"] != block_to_delete]
+                st.rerun()  
 
         # Generate farm simulation data and update graphs
-        if st.button("Update Graphs and Tables"):
+        if st.button("Update Graphs and Tables", key="update_bottom"):
             st.session_state.update_flag = True
             generate_farm_simulation_data(st.session_state.farm_blocks, st.session_state.get('time_horizon', 50))
 
-    elif choice == "Results":
-        st.subheader("Results")
 
-        # Display total emissions and removals graph
+    elif choice == "Carbon Balance":
+        st.header('Carbon Balance', divider="gray")
+
         if 'kpi_df' in st.session_state:
+            # Annual Emissions and Removals
+            st.subheader('Graph: Annual Emissions and Removals Over Time')
+            hf.plot_farm_annual_emissions_removals(st.session_state.kpi_df)
+
+            # Annual Carbon Balance
+            st.subheader('Graph: Annual Carbon Balance Over Time')
+            hf.plot_farm_annual_carbon_balance(st.session_state.kpi_df)
+
+            # Cumulative Emissions and Removals
             st.subheader('Graph: Cumulative Emissions and Removals Over Time')
             hf.plot_farm_cumulative_emissions_removals(st.session_state.kpi_df)
 
-            # Display the Total Farm Emissions and Removals
-            st.subheader("Total Farm Emissions and Removals")
-            hf.display_farm_simulation_data(st.session_state.kpi_df)
+            # Cumulative Carbon Balance
+            st.subheader('Graph: Cumulative Carbon Balance Over Time')
+            hf.plot_farm_cumulative_carbon_balance(st.session_state.kpi_df)
 
-            # Farm Block Breakdown of Annual Emissions and Removals
-            hf.display_farm_block_breakdown_annual(st.session_state.kpi_df, st.session_state.kpi_df)
+            # Tables
+            with st.expander("View Carbon Balance Data Tables"):
+                st.subheader("Annual Carbon Balance Data")
+                hf.display_farm_annual_carbon_balance(st.session_state.kpi_df)
 
-            # Farm Block Breakdown of Cumulative Emissions and Removals
-            hf.display_farm_block_breakdown_cumulative(st.session_state.kpi_df, st.session_state.kpi_df)
+                st.subheader("Cumulative Carbon Balance Data")
+                hf.display_farm_cumulative_carbon_balance(st.session_state.kpi_df)
+        else:
+            st.write("No data available. Please complete the Farm Blocks section first.")
 
-            # Farm Block Breakdown of Cocoa Production
-            hf.display_farm_block_breakdown_cocoa(st.session_state.kpi_df, st.session_state.kpi_df)
+    elif choice == "Carbon Intensity":
+        st.header('Carbon Intensity', divider="gray")
+
+        if 'kpi_df' in st.session_state:
+            # Annual Carbon Intensity
+            st.subheader('Graph: Annual Carbon Intensity Over Time')
+            hf.plot_farm_annual_carbon_intensity(st.session_state.kpi_df)
+
+            # Cumulative Carbon Intensity
+            st.subheader('Graph: Cumulative Carbon Intensity Over Time')
+            hf.plot_farm_cumulative_carbon_intensity(st.session_state.kpi_df)
+
+            # Tables
+            with st.expander("View Carbon Intensity Data Tables"):
+                st.subheader("Annual Carbon Intensity Data")
+                hf.display_farm_annual_carbon_intensity(st.session_state.kpi_df)
+
+                st.subheader("Cumulative Carbon Intensity Data")
+                hf.display_farm_cumulative_carbon_intensity(st.session_state.kpi_df)
+        else:
+            st.write("No data available. Please complete the Farm Blocks section first.")
+
+    elif choice == "Summary":
+        st.header('Summary', divider="gray")
+
+        if 'kpi_df' in st.session_state:
+            # Annual Summary Graph
+            st.subheader('Graph: Annual Emissions, Removals, and Cocoa Production Over Time')
+            hf.plot_farm_annual_summary(st.session_state.kpi_df)
+
+            # Cumulative Summary Graph
+            st.subheader('Graph: Cumulative Emissions, Removals, and Cocoa Production Over Time')
+            hf.plot_farm_cumulative_summary(st.session_state.kpi_df)
+
+            # Tables
+            with st.expander("View Summary Data Tables"):
+                st.subheader("Annual Summary Data")
+                hf.display_farm_annual_summary(st.session_state.kpi_df)
+
+                st.subheader("Cumulative Summary Data")
+                hf.display_farm_cumulative_summary(st.session_state.kpi_df)
+        else:
+            st.write("No data available. Please complete the Farm Blocks section first.")
 
     elif choice == "Save/Load Farm":
-        st.subheader("Save/Load Farm")
+        st.header('Save/Load Farm', divider="gray")
 
         # Save farm
         st.subheader("Save Current Farm")

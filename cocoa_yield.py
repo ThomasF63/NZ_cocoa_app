@@ -10,11 +10,14 @@ def calculate_extended_yield(cocoa_yield_df, time_horizon, cultivation_cycle_dur
     # Calculate the cocoa age for each year
     extended_yield_df['Cocoa Age'] = np.maximum(0, extended_yield_df['Year'] - cocoa_planting_year)
     
+    # Get the maximum age in the original yield curve
+    max_age = len(cocoa_yield_df) - 1
+    
     # Apply the yield based on the cocoa age, resetting at the end of each cycle
+    # and repeating the last year's yield for ages beyond the original curve
     extended_yield_df['Cocoa Yield (kg/ha/yr)'] = extended_yield_df['Cocoa Age'].apply(
-        lambda age: cocoa_yield_df['Cocoa Yield (kg/ha/yr)'].iloc[age % cultivation_cycle_duration] 
-        if age > 0 and age % cultivation_cycle_duration < len(cocoa_yield_df) 
-        else 0
+        lambda age: cocoa_yield_df['Cocoa Yield (kg/ha/yr)'].iloc[min(age % cultivation_cycle_duration, max_age)] 
+        if age > 0 else 0
     )
     
     return extended_yield_df
