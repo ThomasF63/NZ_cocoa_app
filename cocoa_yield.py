@@ -20,7 +20,8 @@ def calculate_extended_yield(cocoa_yield_df, time_horizon, cultivation_cycle_dur
     return extended_yield_df
 
 def cocoa_yield_curve(cultivation_cycle_duration, time_horizon):
-    st.subheader('Cocoa Yield Curve')
+    st.header('Cocoa Yield Parametrization', divider="gray")
+    st.subheader('Cocoa Yield Curve', divider="gray")
 
     # Default yield data
     default_yield = {
@@ -82,7 +83,7 @@ def cocoa_yield_curve(cultivation_cycle_duration, time_horizon):
             st.success("Cocoa Yield updated!")
 
     # Display the updated dataframe with both cocoa yield and relative yield
-    st.subheader("Cocoa Yield and Relative Yield")
+    st.subheader("Cocoa Yield and Relative Yield", divider="gray")
     st.dataframe(st.session_state.cocoa_yield_df.style.format({
         'Cocoa Age': '{:0.0f}',
         'Cocoa Yield (kg/ha/yr)': '{:.2f}',
@@ -116,7 +117,7 @@ def cocoa_yield_curve(cultivation_cycle_duration, time_horizon):
     # Store the extended yield dataframe in session state
     st.session_state['extended_yield_df'] = extended_yield_df
 
-    st.subheader("Extended Cocoa Yield Forecast")
+    st.subheader("Extended Cocoa Yield Forecast", divider="gray")
     st.dataframe(extended_yield_df.style.format({
         'Year': '{:0.0f}',
         'Cocoa Age': '{:0.0f}',

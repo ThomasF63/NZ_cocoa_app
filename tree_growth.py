@@ -5,8 +5,8 @@ import altair as alt
 from helper_functions import exponential_growth, logarithmic_growth, power_function_growth, get_equation_latex
 
 def tree_growth_parameters(time_horizon):
-    st.title("Tree Growth")
-    st.header("Growth Parameterization")
+    st.header("Tree Growth Parametrization", divider="gray")
+    st.subheader("Individual Tree Growth Models", divider="gray")
 
     tree_types = ['Cocoa', 'Shade', 'Timber']
     growth_models = ["Logarithmic Growth (Terra Global Method)", "Exponential Plateau", "Power Function (Cool Farm Method)"]
@@ -96,27 +96,27 @@ def tree_growth_parameters(time_horizon):
     # Calculate combined growth models
     combined_df = combine_tree_growth_models(st.session_state.growth_curve_selections, st.session_state.default_params, time_horizon)
 
-    st.subheader("Combined Tree Growth Models")
+    st.subheader("Combined Tree Growth Models", divider="gray")
     summary_df = pd.DataFrame.from_dict(st.session_state.growth_curve_selections, orient='index', columns=['Selected Growth Model'])
     st.table(summary_df)
     
     st.dataframe(combined_df.style.format({
-        'Year': '{:0.0f}',
+        'Year Number': '{:0.0f}',
         'Cocoa': '{:.2f}',
         'Shade': '{:.2f}',
         'Timber': '{:.2f}'
     }))
     
     # Create a melted dataframe for plotting
-    melted_df = combined_df.melt('Year', var_name='Tree Type', value_name='Carbon Stock (tCO2e/ha)')
+    melted_df = combined_df.melt('Year Number', var_name='Tree Type', value_name='Carbon Stock (tCO2e/ha)')
     
     # Create the line chart
     chart = alt.Chart(melted_df).mark_line().encode(
-        x=alt.X('Year:Q', axis=alt.Axis(format='d', title = 'Year')),
+        x=alt.X('Year Number:Q', axis=alt.Axis(format='d', title='Year')),
         y=alt.Y('Carbon Stock (tCO2e/ha):Q', axis=alt.Axis(format='d')),
         color='Tree Type:N',
         tooltip=[
-            alt.Tooltip('Year:T', format='d'),
+            alt.Tooltip('Year Number:Q', title='Year', format='d'),
             alt.Tooltip('Tree Type:N'),
             alt.Tooltip('Carbon Stock (tCO2e/ha):Q', format='.2f')
         ]
@@ -154,14 +154,11 @@ def calculate_growth_curve(params_df, time_horizon, tree_type):
     return growth_curve_df
 
 def combine_tree_growth_models(growth_curve_selections, default_params, time_horizon):
-    plantation_start_year = st.session_state.get('land_prep_year', 2015)
-    years = np.arange(plantation_start_year, plantation_start_year + time_horizon, dtype=int)
-    combined_df = pd.DataFrame({'Year': years})
-    combined_df['Year'] = combined_df['Year'].astype(int)
+    year_numbers = np.arange(1, time_horizon + 1, dtype=int)
+    combined_df = pd.DataFrame({'Year Number': year_numbers})
 
     for tree_type, growth_curve_type in growth_curve_selections.items():
-        planting_year = st.session_state.get(f'{tree_type.lower()}_planting_year', plantation_start_year)
-        age = np.maximum(0, years - planting_year)
+        age = year_numbers  # Use year numbers directly as age
 
         # Safely get parameters for the current tree type
         params = {}
@@ -174,21 +171,20 @@ def combine_tree_growth_models(growth_curve_selections, default_params, time_hor
 
         y = np.zeros_like(age, dtype=float)  # Initialize with zeros
 
-        mask = age > 0  # Only calculate growth for positive ages
         if growth_curve_type == "Exponential Plateau":
             beta, L, k = params_df.at[tree_type, 'beta'], params_df.at[tree_type, 'L'], params_df.at[tree_type, 'k']
-            y[mask] = exponential_growth(age[mask], beta, L, k)
+            y = exponential_growth(age, beta, L, k)
         elif growth_curve_type == "Logarithmic Growth (Terra Global Method)":
             coefficient = params_df.at[tree_type, 'Coefficient']
             intercept = params_df.at[tree_type, 'Intercept']
-            y[mask] = logarithmic_growth(age[mask], coefficient, intercept)
+            y = logarithmic_growth(age, coefficient, intercept)
             partitioning = params_df.at[tree_type, f'Partitioning {tree_type.split()[0]}']
-            y[mask] *= partitioning
+            y *= partitioning
         elif growth_curve_type == "Power Function (Cool Farm Method)":
             alpha, beta = params_df.at[tree_type, 'alpha'], params_df.at[tree_type, 'beta']
             carbon_content = params_df.at[tree_type, 'carbon_content']
             conversion_factor = params_df.at[tree_type, 'conversion_factor']
-            y[mask] = power_function_growth(age[mask], alpha, beta, carbon_content, conversion_factor)
+            y = power_function_growth(age, alpha, beta, carbon_content, conversion_factor)
 
         combined_df[tree_type] = y
 

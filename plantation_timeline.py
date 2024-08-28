@@ -4,7 +4,7 @@ import altair as alt
 import numpy as np
 
 def plantation_timeline():
-    st.subheader('Plantation Timeline')
+    st.header('Plantation Timeline', divider="gray")
     
     # Initialize session state variables if they don't exist
     if 'timeline_updated' not in st.session_state:
@@ -27,10 +27,12 @@ def plantation_timeline():
     create_timeline_chart(timeline_df)
     
     # Display debugging dataframe
-    st.subheader("Debugging: Plantation Timeline Events")
+    st.subheader("Debugging: Plantation Timeline Events", divider="gray")
     st.dataframe(timeline_df)
     
     # Input fields for years
+    st.subheader("Timing of Plantation Events", divider="gray")
+
     land_prep_year = st.number_input('Year of land preparation:', 
                                      min_value=2000, 
                                      max_value=2100, 
@@ -75,9 +77,6 @@ def plantation_timeline():
         st.session_state['timber_planting_year'] = timber_planting_year
         st.session_state.timeline_updated = True
         st.session_state.show_messages = True
-        st.experimental_rerun()
-
-    if st.session_state.show_messages:
         st.success('Plantation timeline updated successfully!')
         st.info(f"Land preparation year: {st.session_state['land_prep_year']}")
         st.info(f"Shade tree planting year: {st.session_state['shade_planting_year']}")
@@ -88,6 +87,7 @@ def plantation_timeline():
             st.info(f"{tree_type} trees removed at cycle end: {st.session_state[f'remove_{tree_type.lower()}_at_cycle_end']}")
             if st.session_state[f'remove_{tree_type.lower()}_at_cycle_end']:
                 st.info(f"{tree_type} replanting delay: {st.session_state[f'{tree_type.lower()}_replanting_delay']} years")
+        st.rerun()
 
     return land_prep_year, shade_planting_year, cocoa_planting_year, timber_planting_year
 

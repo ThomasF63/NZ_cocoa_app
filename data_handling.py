@@ -45,7 +45,7 @@ def initialize_inputs():
 
 
 def simulation_parameters():
-    st.subheader('Simulation Parameters')
+    st.header('Simulation Parameters', divider="gray")
     
     # Time horizon input
     time_horizon = st.number_input(
@@ -112,74 +112,47 @@ def calculate_scenarios(time_horizon):
     if 'update_flag' in st.session_state and st.session_state.update_flag:
         st.session_state.update_flag = False
 
-        if 'annual_removals_df' not in st.session_state:
-            st.error("Annual removals data not found. Please run the 'One Hectare Model' tab first.")
+        if 'farm_blocks' not in st.session_state:
+            st.error("No farm blocks found. Please add blocks to your farm.")
             return None
 
-        if 'annual_emissions_df' not in st.session_state:
-            st.error("Annual emissions data not found. Please run the 'One Hectare Model' tab first.")
-            return None
+        farm_blocks = st.session_state.farm_blocks
+        kpi_df = pd.DataFrame({'Year': range(st.session_state.get('land_prep_year', 2015), st.session_state.get('land_prep_year', 2015) + time_horizon)})
 
-        kpi_df = pd.DataFrame({'Year': np.arange(1, time_horizon + 1)})
+        total_emissions = np.zeros(time_horizon)
+        total_removals = np.zeros(time_horizon)
+        total_area_planted = np.zeros(time_horizon)
 
-        for index, row in st.session_state.scenarios_df.iterrows():
-            scenario_name = row['Scenario']
-            load_scenario(scenario_name)
+        for _, block in farm_blocks.iterrows():
+            scenario_name = block['Scenario']
+            scenario_data = load_scenario(scenario_name)
+            
+            if scenario_data is None:
+                st.error(f"Scenario '{scenario_name}' not found. Please check your scenarios.")
+                continue
 
-            annual_removals_df = st.session_state['annual_removals_df']
-            annual_emissions_df = st.session_state['annual_emissions_df']
-            cultivation_cycle_duration = st.session_state.get('cultivation_cycle_duration', 20)
-            luc_emissions = st.session_state.get('luc_emissions', 0.5648)
-            replanting_emissions = st.session_state.get('replanting_emissions', 0.0)
+            block_area = block['Area (ha)']
+            start_year = int(block['Year'])
+            
+            annual_emissions = scenario_data['annual_emissions_df']['Total'].values
+            annual_removals = scenario_data['annual_removals_df']['Total_Removals'].values
+            
+            for year in range(time_horizon):
+                if year >= start_year - st.session_state.get('land_prep_year', 2015):
+                    scenario_year = year - (start_year - st.session_state.get('land_prep_year', 2015))
+                    if scenario_year < len(annual_emissions):
+                        total_emissions[year] += annual_emissions[scenario_year] * block_area
+                        total_removals[year] += annual_removals[scenario_year] * block_area
+                    total_area_planted[year] += block_area
 
-            area = row['Area (ha)']
-            start_year = int(row['Year'])
-
-            scenario_data = {
-                "emissions": np.zeros(time_horizon),
-                "removals": np.zeros(time_horizon),
-                "area_planted": np.zeros(time_horizon),
-                "cocoa_yield": np.zeros(time_horizon),
-                "annual_removals_by_tree_type": {year: {tree_type: 0 for tree_type in annual_removals_df.columns if tree_type not in ['Year', 'Total_Removals']} for year in range(1, time_horizon + 1)}
-            }
-
-            for year in range(start_year, time_horizon + 1):
-                scenario_data["area_planted"][year - 1] += area
-                cycle_year = (year - start_year) % cultivation_cycle_duration
-
-                for tree_type in annual_removals_df.columns:
-                    if tree_type not in ['Year', 'Total_Removals']:
-                        annual_growth = annual_removals_df[tree_type].iloc[cycle_year] * area
-                        scenario_data["annual_removals_by_tree_type"][year][tree_type] += annual_growth
-                        scenario_data["removals"][year - 1] += annual_growth
-
-                scenario_data["emissions"][year - 1] += annual_emissions_df['Total'].iloc[cycle_year] * area
-
-                if 'Cocoa Yield (t/ha/yr)' in annual_removals_df.columns:
-                    scenario_data['cocoa_yield'][year - 1] += annual_removals_df['Cocoa Yield (t/ha/yr)'].iloc[cycle_year] * area
-
-                if cycle_year == 0 and year != start_year:
-                    scenario_data["emissions"][year - 1] += annual_emissions_df['Total'].iloc[0] * area
-
-            if start_year <= time_horizon:
-                scenario_data["emissions"][start_year - 1] += area * luc_emissions
-            last_year_of_cycle = start_year + cultivation_cycle_duration - 1
-            if last_year_of_cycle <= time_horizon:
-                scenario_data["emissions"][last_year_of_cycle - 1] += area * replanting_emissions
-
-            cumulative_emissions = np.cumsum(scenario_data["emissions"])
-            cumulative_removals = np.cumsum(scenario_data["removals"])
-            carbon_balance = cumulative_removals - cumulative_emissions
-
-            farm_block_name = f'{row["Farm"]}-{row["Block"]}'
-            kpi_df[f'{farm_block_name}: Cumulative Emissions'] = cumulative_emissions
-            kpi_df[f'{farm_block_name}: Cumulative Removals'] = cumulative_removals
-            kpi_df[f'{farm_block_name}: Carbon Balance'] = carbon_balance
-            kpi_df[f'{farm_block_name}: Total Area Planted (ha)'] = scenario_data["area_planted"]
-
-            st.session_state[f'{farm_block_name}_annual_removals_by_tree_type'] = scenario_data["annual_removals_by_tree_type"]
+        kpi_df['Cumulative Emissions'] = np.cumsum(total_emissions)
+        kpi_df['Cumulative Removals'] = np.cumsum(total_removals)
+        kpi_df['Carbon Balance'] = kpi_df['Cumulative Removals'] - kpi_df['Cumulative Emissions']
+        kpi_df['Total Area Planted'] = total_area_planted
 
         st.session_state.kpi_df = kpi_df
+
+    return st.session_state.get('kpi_df', None)
 
 
 

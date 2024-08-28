@@ -16,7 +16,8 @@ def calculate_carbon_intensity(annual_removals_df, annual_emissions_df, extended
     years = annual_emissions_df['Year'].values[:min_length]
 
     # Annual Carbon Intensity
-    annual_carbon_intensity = (total_emissions - total_removals) / (cocoa_yield / 1000)  # Convert kg to tonnes
+    net_emissions = total_emissions - total_removals
+    annual_carbon_intensity = net_emissions / (cocoa_yield / 1000)  # Convert kg to tonnes
     annual_carbon_intensity = np.where(cocoa_yield == 0, np.nan, annual_carbon_intensity)  # Handle division by zero
 
     annual_carbon_intensity_df = pd.DataFrame({
@@ -24,6 +25,7 @@ def calculate_carbon_intensity(annual_removals_df, annual_emissions_df, extended
         'Year': years,
         'Total Emissions': total_emissions,
         'Total Removals': total_removals,
+        'Net Emissions': net_emissions,
         'Cocoa Yield (kg/ha/yr)': cocoa_yield,
         'Annual Carbon Intensity (tCO2e/t Cocoa)': annual_carbon_intensity
     })
@@ -31,8 +33,9 @@ def calculate_carbon_intensity(annual_removals_df, annual_emissions_df, extended
     # Cumulative Carbon Intensity
     cumulative_emissions = np.cumsum(total_emissions)
     cumulative_removals = np.cumsum(total_removals)
+    cumulative_net_emissions = cumulative_emissions - cumulative_removals
     cumulative_yield = np.cumsum(cocoa_yield)
-    cumulative_carbon_intensity = (cumulative_emissions - cumulative_removals) / (cumulative_yield / 1000)  # Convert kg to tonnes
+    cumulative_carbon_intensity = cumulative_net_emissions / (cumulative_yield / 1000)  # Convert kg to tonnes
     cumulative_carbon_intensity = np.where(cumulative_yield == 0, np.nan, cumulative_carbon_intensity)  # Handle division by zero
 
     cumulative_carbon_intensity_df = pd.DataFrame({
@@ -40,6 +43,7 @@ def calculate_carbon_intensity(annual_removals_df, annual_emissions_df, extended
         'Year': years,
         'Cumulative Emissions': cumulative_emissions,
         'Cumulative Removals': cumulative_removals,
+        'Net Emissions': cumulative_net_emissions,
         'Cumulative Cocoa Yield (kg/ha)': cumulative_yield,
         'Cumulative Carbon Intensity (tCO2e/t Cocoa)': cumulative_carbon_intensity
     })
@@ -78,7 +82,7 @@ def carbon_intensity_section(time_horizon):
     if st.session_state.get('reserve_rate_changed', False):
         apply_global_reserve_rate()
 
-    st.subheader('Carbon Intensity Section')
+    st.header('Carbon Intensity', divider="gray")
 
     if 'adjusted_annual_removals_df' in st.session_state and 'annual_emissions_df' in st.session_state and 'extended_yield_df' in st.session_state:
         annual_removals_df = st.session_state['adjusted_annual_removals_df']

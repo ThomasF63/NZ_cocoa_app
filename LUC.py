@@ -43,7 +43,7 @@ def generate_luc_emissions_df(time_horizon, luc_event_year, luc_emissions, amort
 
 
 def luc_parameters():
-    st.subheader('Land Use Change (LUC) Parameters')
+    st.header('Land Use Change (LUC) Parameters', divider="gray")
     
     luc_event_year = st.number_input('Year of LUC event:', 
                                      min_value=1900, 

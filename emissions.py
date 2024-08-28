@@ -26,13 +26,17 @@ def update_emissions_df(cultivation_cycle_duration=20):
         [1.467, 0.875, 0.060, 0.005, 1.080]
     ])
 
-    # Use only the first 'cultivation_cycle_duration' rows
-    emissions_values = initial_values[:cultivation_cycle_duration]
+    # Adjust initial_values to match cultivation_cycle_duration
+    if cultivation_cycle_duration > len(initial_values):
+        # If cultivation_cycle_duration is longer, repeat the last row
+        extra_rows = cultivation_cycle_duration - len(initial_values)
+        initial_values = np.vstack((initial_values, np.tile(initial_values[-1], (extra_rows, 1))))
+    elif cultivation_cycle_duration < len(initial_values):
+        # If cultivation_cycle_duration is shorter, truncate the array
+        initial_values = initial_values[:cultivation_cycle_duration]
 
     # Create the DataFrame
-    emissions_df = pd.DataFrame(np.column_stack((year_numbers[:cultivation_cycle_duration], 
-                                                 actual_years[:cultivation_cycle_duration], 
-                                                 emissions_values)), 
+    emissions_df = pd.DataFrame(np.column_stack((year_numbers, actual_years, initial_values)), 
                                 columns=emission_sources)
     
     # Calculate total emissions
@@ -118,7 +122,7 @@ def update_annual_emissions_df(time_horizon, cultivation_cycle_duration):
 
 
 def emissions_input(cultivation_cycle_duration):
-    st.subheader('Emissions Input')
+    st.header('Emissions Parametrization', divider="gray")
 
     # Initialize or update emissions_df with the cultivation cycle duration
     emissions_df = update_emissions_df(cultivation_cycle_duration)

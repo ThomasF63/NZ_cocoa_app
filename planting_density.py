@@ -3,7 +3,6 @@
 import streamlit as st
 
 def planting_density_section():
-    st.header("Planting Density")
 
     # Initialize the planting densities in session state if not already present
     if 'planting_densities' not in st.session_state:
@@ -13,8 +12,10 @@ def planting_density_section():
         }
         st.session_state.selected_density = 'reference'
 
+    st.header("Planting Density Parametrization", divider="gray")
+
     # Input fields for reference planting densities
-    st.subheader("Reference Density")
+    st.subheader("Reference Density", divider="gray")
     reference_cocoa_density = st.number_input("Reference Cocoa Density (trees/ha):", 
                                               min_value=0, 
                                               value=st.session_state.planting_densities['reference']['Cocoa'], 
@@ -29,7 +30,7 @@ def planting_density_section():
                                                key='reference_timber_density')
 
     # Input fields for modified planting densities
-    st.subheader("Modified Density")
+    st.subheader("Modified Density", divider="gray")
     modified_cocoa_density = st.number_input("Modified Cocoa Density (trees/ha):", 
                                              min_value=0, 
                                              value=st.session_state.planting_densities['modified']['Cocoa'], 

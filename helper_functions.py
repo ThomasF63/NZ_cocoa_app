@@ -1,4 +1,5 @@
 # helper_functions.py
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -144,27 +145,48 @@ def create_cumulative_emissions_stacked_bar_chart(dataframe, x_axis, y_axis, col
     return chart
 
 
+
 def plot_carbon_balance_bars_one_hectare(kpi_df, time_horizon):
     chart = alt.Chart(kpi_df).transform_calculate(
-        positive='datum["Carbon Balance"] < 0'
+        negative='datum["Cumulative Carbon Balance"] < 0'
     ).mark_bar().encode(
         x=alt.X('Year:O', axis=alt.Axis(title='Year', format='d')),
-        y=alt.Y('Carbon Balance:Q', axis=alt.Axis(title='tCO2e')),
+        y=alt.Y('Cumulative Carbon Balance:Q', axis=alt.Axis(title='tCO2e')),
         color=alt.condition(
-            alt.datum['Carbon Balance'] < 0,
+            alt.datum['Cumulative Carbon Balance'] < 0,
             alt.value('green'),
             alt.value('red')
         ),
-        tooltip=[alt.Tooltip('Year:O', title='Year', format='d'), 'Carbon Balance:Q']
+        tooltip=[alt.Tooltip('Year:O', title='Year', format='d'), 'Cumulative Carbon Balance:Q']
+    )
+    return chart
+
+def plot_annual_carbon_balance_bars_one_hectare(kpi_df, time_horizon):
+    chart = alt.Chart(kpi_df).transform_calculate(
+        negative='datum["Annual Carbon Balance"] < 0'
+    ).mark_bar().encode(
+        x=alt.X('Year:O', axis=alt.Axis(title='Year', format='d')),
+        y=alt.Y('Annual Carbon Balance:Q', axis=alt.Axis(title='tCO2e')),
+        color=alt.condition(
+            alt.datum['Annual Carbon Balance'] < 0,
+            alt.value('green'),
+            alt.value('red')
+        ),
+        tooltip=[alt.Tooltip('Year:O', title='Year', format='d'), 'Annual Carbon Balance:Q']
     )
     return chart
 
 
 
 def plot_emissions_vs_removals_one_hectare(kpi_df, time_horizon):
-    df_filtered = kpi_df.melt(id_vars=['Year', 'Year Number'], value_vars=['Emissions', 'Removals'], var_name='Type', value_name='tCO2e')
+    df_filtered = kpi_df.melt(
+        id_vars=['Year', 'Year Number'],
+        value_vars=['Cumulative Emissions', 'Cumulative Removals'],
+        var_name='Type',
+        value_name='tCO2e'
+    )
     color_scale = alt.Scale(
-        domain=['Emissions', 'Removals'],
+        domain=['Cumulative Emissions', 'Cumulative Removals'],
         range=[do.EMISSIONS_COLOR, do.REMOVALS_COLOR]
     )
     chart = alt.Chart(df_filtered).mark_line().encode(
@@ -175,6 +197,25 @@ def plot_emissions_vs_removals_one_hectare(kpi_df, time_horizon):
     )
     return chart
 
+
+def plot_annual_emissions_vs_removals_one_hectare(kpi_df, time_horizon):
+    df_filtered = kpi_df.melt(
+        id_vars=['Year', 'Year Number'],
+        value_vars=['Annual Emissions', 'Annual Removals'],
+        var_name='Type',
+        value_name='tCO2e'
+    )
+    color_scale = alt.Scale(
+        domain=['Annual Emissions', 'Annual Removals'],
+        range=[do.EMISSIONS_COLOR, do.REMOVALS_COLOR]
+    )
+    chart = alt.Chart(df_filtered).mark_line().encode(
+        x=alt.X('Year:O', axis=alt.Axis(title='Year', format='d')),
+        y=alt.Y('tCO2e:Q', axis=alt.Axis(title='tCO2e')),
+        color=alt.Color('Type:N', scale=color_scale),
+        tooltip=[alt.Tooltip('Year:O', title='Year', format='d'), 'tCO2e:Q', 'Type:N']
+    )
+    return chart
 
 
 def plot_summary_emissions_removals_cocoa_production(summary_df):
@@ -241,23 +282,6 @@ def plot_annual_emissions_removals_cocoa_yield(annual_summary_df):
     ).interactive()
     return combined_annual_chart
 
-
-
-
-def plot_total_area_planted(kpi_df):
-    for scenario in st.session_state.scenarios_df['Scenario'].unique():
-        kpi_df[f'{scenario}: Total Area Planted (ha)'] = 0
-        for _, row in st.session_state.scenarios_df[st.session_state.scenarios_df['Scenario'] == scenario].iterrows():
-            kpi_df.loc[kpi_df['Year'] >= row['Year'], f'{scenario}: Total Area Planted (ha)'] += row['Area (ha)']
-
-    total_area_planted_df = kpi_df.melt(id_vars='Year', value_vars=[col for col in kpi_df.columns if 'Total Area Planted' in col], var_name='Scenario', value_name='Area (ha)')
-    total_area_planted_chart = alt.Chart(total_area_planted_df).mark_line().encode(
-        x='Year:Q',
-        y='Area (ha):Q',
-        color='Scenario:N',
-        tooltip=['Year:Q', 'Area (ha):Q', 'Scenario:N']
-    ).interactive().properties(title='Total Planted Area Over Time')
-    st.altair_chart(total_area_planted_chart, use_container_width=True)
 
 
 
@@ -406,3 +430,100 @@ def plot_annual_carbon_intensity(kpi_df):
         st.altair_chart(carbon_intensity_chart, use_container_width=True)
 
 
+
+
+# Helper functions for the farm-related plots
+def plot_farm_total_area_planted(kpi_df):
+    kpi_df['Total Area Planted (ha)'] = kpi_df.filter(like='Area').sum(axis=1)
+    total_area_planted_chart = alt.Chart(kpi_df).mark_line().encode(
+        x=alt.X('Year:O', axis=alt.Axis(title='Year', format='d')),
+        y=alt.Y('Total Area Planted (ha):Q', axis=alt.Axis(title='Total Area Planted (ha)')),
+        tooltip=['Year:O', 'Total Area Planted (ha):Q']
+    ).properties(title='Total Planted Area Over Time', width=700, height=400)
+
+    st.altair_chart(total_area_planted_chart, use_container_width=True)
+
+def plot_farm_cumulative_emissions_removals(kpi_df):
+    combined_df = kpi_df[['Year', 'Cumulative Emissions', 'Cumulative Removals']]
+    cumulative_chart = combined_df.melt('Year', var_name='Type', value_name='Value')
+    cumulative_chart = alt.Chart(cumulative_chart).mark_line().encode(
+        x=alt.X('Year:O', axis=alt.Axis(title='Year', format='d')),
+        y=alt.Y('Value:Q', axis=alt.Axis(title='Cumulative Emissions and Removals (tCO2e)')),
+        color=alt.Color('Type:N', scale=alt.Scale(domain=['Cumulative Emissions', 'Cumulative Removals'],
+                                                 range=[do.EMISSIONS_COLOR, do.REMOVALS_COLOR]))
+    ).properties(
+        width=700,
+        height=400
+    )
+
+    st.altair_chart(cumulative_chart, use_container_width=True)
+
+def display_farm_simulation_data(timeseries_df):
+    necessary_columns = ['Cumulative Emissions', 'Cumulative Removals', 'Annual Emissions', 'Annual Removals', 'Cumulative Cocoa Yield', 'Annual Cocoa Yield']
+    for column in necessary_columns:
+        if column not in timeseries_df.columns:
+            timeseries_df[column] = np.nan
+
+    timeseries_df['Year Number'] = range(1, len(timeseries_df) + 1)
+    timeseries_df = timeseries_df[['Year Number', 'Year', 'Cumulative Emissions', 'Cumulative Removals', 'Annual Emissions', 'Annual Removals', 'Cumulative Cocoa Yield', 'Annual Cocoa Yield']]
+    
+    timeseries_df = timeseries_df.rename(columns={
+        'Cumulative Emissions': 'Total Cumulative Emissions',
+        'Cumulative Removals': 'Total Cumulative Removals',
+        'Annual Emissions': 'Total Annual Emissions',
+        'Annual Removals': 'Total Annual Removals',
+        'Cumulative Cocoa Yield': 'Cumulative Cocoa Yield',
+        'Annual Cocoa Yield': 'Annual Cocoa Yield'
+    })
+    
+    timeseries_df['Total Cumulative Emissions'] = timeseries_df['Total Cumulative Emissions'].round(2)
+    timeseries_df['Total Cumulative Removals'] = timeseries_df['Total Cumulative Removals'].round(2)
+    timeseries_df['Total Annual Emissions'] = timeseries_df['Total Annual Emissions'].round(2)
+    timeseries_df['Total Annual Removals'] = timeseries_df['Total Annual Removals'].round(2)
+    timeseries_df['Cumulative Cocoa Yield'] = timeseries_df['Cumulative Cocoa Yield'].round(2)
+    timeseries_df['Annual Cocoa Yield'] = timeseries_df['Annual Cocoa Yield'].round(2)
+    
+    st.dataframe(timeseries_df.style.format({
+        'Year': '{:0.0f}',
+        'Total Cumulative Emissions': '{:.2f}',
+        'Total Cumulative Removals': '{:.2f}',
+        'Total Annual Emissions': '{:.2f}',
+        'Total Annual Removals': '{:.2f}',
+        'Cumulative Cocoa Yield': '{:.2f}',
+        'Annual Cocoa Yield': '{:.2f}'
+    }))
+
+
+
+def display_farm_block_breakdown_annual(timeseries_df, kpi_df):
+    st.subheader("Farm Block Breakdown of Annual Emissions and Removals")
+    annual_emissions_df = kpi_df.filter(like='Annual Emissions').copy()
+    annual_removals_df = kpi_df.filter(like='Annual Removals').copy()
+    breakdown_annual_df = pd.concat([timeseries_df[['Year Number', 'Year']], annual_emissions_df, annual_removals_df], axis=1)
+    st.dataframe(breakdown_annual_df.style.format({
+        'Year': '{:0.0f}',
+        'Annual Emissions': '{:.2f}',
+        'Annual Removals': '{:.2f}'
+    }))
+
+def display_farm_block_breakdown_cumulative(timeseries_df, kpi_df):
+    st.subheader("Farm Block Breakdown of Cumulative Emissions and Removals")
+    cumulative_emissions_df = kpi_df.filter(like='Cumulative Emissions').copy()
+    cumulative_removals_df = kpi_df.filter(like='Cumulative Removals').copy()
+    breakdown_cumulative_df = pd.concat([timeseries_df[['Year Number', 'Year']], cumulative_emissions_df, cumulative_removals_df], axis=1)
+    st.dataframe(breakdown_cumulative_df.style.format({
+        'Year': '{:0.0f}',
+        'Cumulative Emissions': '{:.2f}',
+        'Cumulative Removals': '{:.2f}'
+    }))
+
+def display_farm_block_breakdown_cocoa(timeseries_df, kpi_df):
+    st.subheader("Farm Block Breakdown of Cocoa Production")
+    cocoa_yield_df = kpi_df.filter(like='Cocoa Yield').copy()
+    cocoa_yield_df['Yearly Total'] = cocoa_yield_df.sum(axis=1)
+    breakdown_cocoa_df = pd.concat([timeseries_df[['Year Number', 'Year']], cocoa_yield_df], axis=1)
+    st.dataframe(breakdown_cocoa_df.style.format({
+        'Year': '{:0.0f}',
+        'Cocoa Yield': '{:.2f}',
+        'Yearly Total': '{:.2f}'
+    }))

@@ -7,11 +7,10 @@ from reserve_rate_widget import reserve_rate_widget
 from data_handling import apply_global_reserve_rate
 
 def summary_section(time_horizon):
-
     if st.session_state.get('reserve_rate_changed', False):
         apply_global_reserve_rate()
 
-    st.subheader('Summary Section')
+    st.header('1ha Summary', divider="gray")
 
     if 'adjusted_annual_removals_df' in st.session_state and 'annual_emissions_df' in st.session_state and 'extended_yield_df' in st.session_state:
         annual_removals_df = st.session_state['adjusted_annual_removals_df']
@@ -36,17 +35,20 @@ def summary_section(time_horizon):
         # Create lines for Emissions and Removals
         emissions_removals = base.mark_line().encode(
             y=alt.Y('Emissions:Q', axis=alt.Axis(title='Cumulative Emissions and Removals (tCO2e)')),
-            color=alt.value(do.EMISSIONS_COLOR)
-        ) + base.mark_line().encode(
+            color=alt.value(do.EMISSIONS_COLOR),
+            tooltip=[alt.Tooltip('Year:O', title='Year'), alt.Tooltip('Emissions:Q', title='Cumulative Emissions', format='.2f')]
+        ).interactive() + base.mark_line().encode(
             y=alt.Y('Removals:Q', axis=alt.Axis(title='Cumulative Emissions and Removals (tCO2e)')),
-            color=alt.value(do.REMOVALS_COLOR)
-        )
+            color=alt.value(do.REMOVALS_COLOR),
+            tooltip=[alt.Tooltip('Year:O', title='Year'), alt.Tooltip('Removals:Q', title='Cumulative Removals', format='.2f')]
+        ).interactive()
 
         # Create line for Cocoa Yield
         cocoa_yield = base.mark_line().encode(
             y=alt.Y('Cocoa Yield (kg/ha/yr):Q', axis=alt.Axis(title='Cocoa Yield (kg/ha/yr)')),
-            color=alt.value(do.COCOA_YIELD_COLOR)
-        )
+            color=alt.value(do.COCOA_YIELD_COLOR),
+            tooltip=[alt.Tooltip('Year:O', title='Year'), alt.Tooltip('Cocoa Yield (kg/ha/yr):Q', title='Cocoa Yield', format='.2f')]
+        ).interactive()
 
         # Combine charts
         cumulative_summary_chart = alt.layer(emissions_removals, cocoa_yield).resolve_scale(
@@ -55,9 +57,21 @@ def summary_section(time_horizon):
             title='Cumulative Emissions, Removals, and Cocoa Yield Over Time',
             width=600,
             height=400
-        ).interactive()
+        )
 
-        st.altair_chart(cumulative_summary_chart, use_container_width=True)
+        # Add legend
+        legend = alt.Chart(pd.DataFrame({
+            'category': ['Emissions', 'Removals', 'Cocoa Yield'],
+            'color': [do.EMISSIONS_COLOR, do.REMOVALS_COLOR, do.COCOA_YIELD_COLOR]
+        })).mark_point().encode(
+            y=alt.Y('category:N', axis=alt.Axis(title='Legend')),
+            color=alt.Color('color:N', scale=None)
+        )
+
+        # Combine chart and legend
+        final_chart = alt.hconcat(cumulative_summary_chart, legend)
+
+        st.altair_chart(final_chart, use_container_width=True)
 
         st.subheader('Table: Cumulative Summary Data')
         format_dict = {
@@ -87,17 +101,20 @@ def summary_section(time_horizon):
         # Create lines for Annual Emissions and Removals
         annual_emissions_removals = annual_base.mark_line().encode(
             y=alt.Y('Annual Emissions:Q', axis=alt.Axis(title='Annual Emissions and Removals (tCO2e)')),
-            color=alt.value(do.EMISSIONS_COLOR)
-        ) + annual_base.mark_line().encode(
+            color=alt.value(do.EMISSIONS_COLOR),
+            tooltip=[alt.Tooltip('Year:O', title='Year'), alt.Tooltip('Annual Emissions:Q', title='Annual Emissions', format='.2f')]
+        ).interactive() + annual_base.mark_line().encode(
             y=alt.Y('Annual Removals:Q', axis=alt.Axis(title='Annual Emissions and Removals (tCO2e)')),
-            color=alt.value(do.REMOVALS_COLOR)
-        )
+            color=alt.value(do.REMOVALS_COLOR),
+            tooltip=[alt.Tooltip('Year:O', title='Year'), alt.Tooltip('Annual Removals:Q', title='Annual Removals', format='.2f')]
+        ).interactive()
 
         # Create line for Annual Cocoa Yield
         annual_cocoa_yield = annual_base.mark_line().encode(
             y=alt.Y('Cocoa Yield:Q', axis=alt.Axis(title='Cocoa Yield (kg/ha/yr)')),
-            color=alt.value(do.COCOA_YIELD_COLOR)
-        )
+            color=alt.value(do.COCOA_YIELD_COLOR),
+            tooltip=[alt.Tooltip('Year:O', title='Year'), alt.Tooltip('Cocoa Yield:Q', title='Cocoa Yield', format='.2f')]
+        ).interactive()
 
         # Combine annual charts
         annual_summary_chart = alt.layer(annual_emissions_removals, annual_cocoa_yield).resolve_scale(
@@ -106,9 +123,21 @@ def summary_section(time_horizon):
             title='Annual Emissions, Removals, and Cocoa Yield Over Time',
             width=600,
             height=400
-        ).interactive()
+        )
 
-        st.altair_chart(annual_summary_chart, use_container_width=True)
+        # Add legend for annual chart
+        annual_legend = alt.Chart(pd.DataFrame({
+            'category': ['Annual Emissions', 'Annual Removals', 'Cocoa Yield'],
+            'color': [do.EMISSIONS_COLOR, do.REMOVALS_COLOR, do.COCOA_YIELD_COLOR]
+        })).mark_point().encode(
+            y=alt.Y('category:N', axis=alt.Axis(title='Legend')),
+            color=alt.Color('color:N', scale=None)
+        )
+
+        # Combine annual chart and legend
+        final_annual_chart = alt.hconcat(annual_summary_chart, annual_legend)
+
+        st.altair_chart(final_annual_chart, use_container_width=True)
 
         st.subheader('Table: Annual Summary Data')
         format_dict = {
